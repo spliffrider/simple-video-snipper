@@ -15,7 +15,7 @@ internal sealed class RecordingHost : IDisposable
     private readonly WebApplication app;
     private readonly string route = "/" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private readonly object sessionLock = new();
-    private TaskCompletionSource? stop;
+    private RecordingSession? active;
 
     private RecordingHost(WebApplication app, string folder)
     {
@@ -39,7 +39,7 @@ internal sealed class RecordingHost : IDisposable
         get
         {
             lock (sessionLock)
-                return stop is not null;
+                return active is not null;
         }
     }
 
@@ -61,7 +61,18 @@ internal sealed class RecordingHost : IDisposable
     public void RequestStop()
     {
         lock (sessionLock)
-            stop?.TrySetResult();
+            active?.RequestStop();
+    }
+
+    public RecordingSession? TryStartRecording()
+    {
+        lock (sessionLock)
+        {
+            if (active is not null)
+                return null;
+
+            return active = new RecordingSession(this);
+        }
     }
 
     private void MapAsset(string path, string resource, string type)
@@ -94,28 +105,15 @@ internal sealed class RecordingHost : IDisposable
             return;
         }
 
-        var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (sessionLock)
+        using var session = TryStartRecording();
+        if (session is null)
         {
-            if (stop is not null)
-            {
-                context.Response.StatusCode = StatusCodes.Status409Conflict;
-                return;
-            }
-
-            stop = stopSignal;
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            return;
         }
 
-        try
-        {
-            using var socket = await context.WebSockets.AcceptWebSocketAsync();
-            await SaveRecordingAsync(socket, stopSignal.Task, context.RequestAborted);
-        }
-        finally
-        {
-            lock (sessionLock)
-                stop = null;
-        }
+        using var socket = await context.WebSockets.AcceptWebSocketAsync();
+        await SaveRecordingAsync(socket, session.StopRequested, context.RequestAborted);
     }
 
     private async Task SaveRecordingAsync(WebSocket socket, Task stopSignal, CancellationToken cancellationToken)
@@ -221,4 +219,22 @@ internal sealed class RecordingHost : IDisposable
     }
 
     public void Dispose() => app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    internal sealed class RecordingSession(RecordingHost owner) : IDisposable
+    {
+        private readonly TaskCompletionSource stop = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task StopRequested => stop.Task;
+
+        public void RequestStop() => stop.TrySetResult();
+
+        public void Dispose()
+        {
+            lock (owner.sessionLock)
+            {
+                if (owner.active == this)
+                    owner.active = null;
+            }
+        }
+    }
 }

@@ -2,6 +2,15 @@
 
 Simple Video Snipper is a Windows 11 x64 tray app for recording short clips. Press a global shortcut, select an area, window, or Chrome tab, and start recording. After Stop, save the clip to a chosen folder or use Quick Save. An optional setting copies the finished file to the Windows clipboard. Recordings stay on the device.
 
+## Try the area recording prototype
+
+Run `dotnet run -c Release` with the .NET 10 SDK on Windows 11.
+
+1. Move the pointer to the display you want to capture and press **Ctrl+Alt+R**. You can also choose **Record area** in the app or tray menu.
+2. Drag to draw a rectangle. Draw again or drag its lower-right handle to adjust it. Press **Esc** to cancel.
+3. Choose **Record**, then use the floating **Stop recording** button or the tray menu. The shortcut brings the recording controls forward while a capture is running.
+4. Choose **Open recordings folder** in the tray to find the silent H.264 MP4 in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`.
+
 ## Try the Chrome recording prototype
 
 Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
@@ -30,7 +39,7 @@ Check access and free space before Record. Write each session to an app-owned te
 | Milestone | Work and acceptance check |
 | --- | --- |
 | 1. Prove the Chrome handoff | Build a local companion page served on loopback by the desktop app. A user click invokes `getDisplayMedia`; request the tab picker, verify the selected surface, and disable switching the capture source. Write `MediaRecorder` chunks in order to disk through a session-scoped local connection. Test recording a Chrome tab with its audio, switching tabs, and stopping from both the tray and the browser. The desktop app receives a playable clip without an upload or a manual download. [Chrome source controls](https://developer.chrome.com/docs/web-platform/screen-sharing-controls) · [MediaRecorder chunks](https://www.w3.org/TR/mediastream-recording/) |
-| 2. Ship an internal area-to-MP4 build | Build the .NET 10 WPF tray UI, global shortcut, and per-monitor DPI-aware selection overlay. Capture with Windows Graphics Capture, convert the rectangle to physical pixels, and crop before encoding. Start at 30 fps. Test a visible pixel grid on monitors at 100% and 150% scaling and confirm that the rectangle is accurate, the app controls stay out of the clip, and the result plays as MP4. [WPF for .NET 10](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/whats-new/net100) · [Windows Graphics Capture](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) |
+| 2. Ship an internal area-to-MP4 build | Extend the .NET 10 tray app with a global shortcut and a per-monitor DPI-aware selection overlay. Use physical pixels for the rectangle and crop Windows Graphics Capture frames before encoding at 30 fps. Test a visible pixel grid at two Windows display scales and confirm that the rectangle is accurate, the app controls stay out of the clip, and the result plays as MP4. [WinForms DPI settings](https://learn.microsoft.com/en-us/dotnet/core/project-sdk/msbuild-props-desktop#applicationhighdpimode) · [Windows Graphics Capture](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) |
 | 3. Add window capture and audio | Add open-window selection to the native capture path. Keep output dimensions fixed and fit a resized window inside the frame. Capture mic and system sound through WASAPI in native modes. In tab mode, mix the selected tab audio and optional mic in the companion page. Timestamp audio and video on a shared timeline and test each audio source alone, both together, and a mic disconnect during a multi-minute capture. |
 | 4. Complete the shared export and settings flow | Route all three capture modes through the same staging, export, and clipboard code. Prototype FFmpeg as the shared exporter with MP4 and WebM presets. Reuse already compatible streams where possible. Verify both formats from each mode, Save As and Quick Save, paste into a target that accepts files, and run a retry after making the destination unwritable. Verify that a failed export leaves the temporary clip intact. [FFmpeg codec documentation](https://ffmpeg.org/ffmpeg-codecs.html) |
 | 5. Package and test the installer | Build a per-user Inno Setup installer. On a clean Windows 11 account, test the default and a custom temporary folder, an unwritable path, changing the folder in Settings, and an upgrade. Install on a machine without development tools and record, save, and copy a clip from every capture mode. |
