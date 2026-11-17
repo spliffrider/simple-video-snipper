@@ -2,6 +2,8 @@
 
 Simple Video Snipper is a Windows 11 x64 tray app for recording short clips. Press a global shortcut, select an area, window, or Chrome tab, and start recording. After Stop, save the clip to a chosen folder or use Quick Save. An optional setting copies the finished file to the Windows clipboard. Recordings stay on the device.
 
+The [macOS build plan](docs/macos-build-plan.md) covers the native Mac implementation and the shared Chrome recorder.
+
 ## Try the area recording prototype
 
 Run `dotnet run -c Release` with the .NET 10 SDK on Windows 11.
