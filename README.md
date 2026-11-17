@@ -2,6 +2,15 @@
 
 Simple Video Snipper is a Windows 11 x64 tray app for recording short clips. Press a global shortcut, select an area, window, or Chrome tab, and start recording. After Stop, save the clip to a chosen folder or use Quick Save. An optional setting copies the finished file to the Windows clipboard. Recordings stay on the device.
 
+## Try the Chrome recording prototype
+
+Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
+
+1. Click **Open Chrome recorder** in the desktop window or tray menu.
+2. Turn on **Include tab audio**, click **Choose tab**, and select the Chrome tab you want to record. Enable audio in Chrome’s sharing dialog if needed.
+3. Click **Record**. Keep the recorder page open and use **Stop recording** on the page, in the desktop window, or in the tray.
+4. Open the `.webm` from **Open recordings folder** in the tray. The prototype saves directly to `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`. An interrupted transfer can leave a `.webm.partial` with the bytes received so far.
+
 ## Capture flow and defaults
 
 1. Open the capture toolbar from the tray or with `Ctrl+Alt+R`. Let users rebind the shortcut, including Windows-key combinations that register successfully. Keep the previous binding if a new one conflicts. `Win+Shift+R` already opens Windows Snipping Tool. [Hotkey registration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey) · [Snipping Tool shortcuts](https://support.microsoft.com/en-us/windows/apps/use-snipping-tool-to-capture-screenshots)

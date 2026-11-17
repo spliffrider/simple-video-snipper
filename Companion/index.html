@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simple Video Snipper</title>
+  <link rel="stylesheet" href="recorder.css">
+  <script defer src="recorder.js"></script>
+</head>
+<body>
+  <main>
+    <h1>Record a Chrome tab</h1>
+    <label><input id="audio" type="checkbox"> Include tab audio</label>
+    <div class="actions">
+      <button id="action" type="button">Choose tab</button>
+      <button id="cancel" type="button" hidden>Cancel</button>
+    </div>
+    <p id="status" role="status" aria-live="polite">Choose the tab you want to record.</p>
+  </main>
+</body>
+</html>
