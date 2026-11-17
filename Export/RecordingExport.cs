@@ -39,6 +39,16 @@ internal sealed record PendingClip(string Path, ExportFormat Format)
     public static string NewPath(string folder, string source, ExportFormat format) =>
         System.IO.Path.Combine(folder, $"{source} {DateTime.Now:yyyy-MM-dd HH-mm-ss} {Guid.NewGuid():N}{format.Extension()}");
 
+    public static PendingClip? FromFile(string path)
+    {
+        if (ExportFormats.FromPath(path) is not { } format)
+            return null;
+        var name = System.IO.Path.GetFileNameWithoutExtension(path);
+        var separator = name.LastIndexOf(' ');
+        return separator >= 0 && Guid.TryParseExact(name[(separator + 1)..], "N", out _)
+            ? new PendingClip(path, format) : null;
+    }
+
     public override string ToString() => Title;
 }
 
@@ -53,6 +63,8 @@ internal readonly record struct ExportResult(string Path, string? CleanupWarning
 
 internal static class RecordingExporter
 {
+    private static readonly string BundledFfmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe");
+
     public static async Task<ExportResult> SaveAsync(PendingClip clip, ExportRequest request)
     {
         var destination = Path.GetFullPath(request.Path);
@@ -134,6 +146,8 @@ internal static class RecordingExporter
         var local = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");
         if (File.Exists(local))
             return local;
+        if (File.Exists(BundledFfmpeg))
+            return BundledFfmpeg;
         foreach (var entry in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
         {
             var directory = entry.Trim().Trim('"');
@@ -159,8 +173,14 @@ internal static class RecordingExporter
         if (clip.Format == format)
             Add("-c", "copy");
         else if (format == ExportFormat.Mp4)
-            Add("-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-preset", "fast",
-                "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart");
+        {
+            Add("-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2");
+            if (string.Equals(ffmpeg, BundledFfmpeg, StringComparison.OrdinalIgnoreCase))
+                Add("-c:v", "h264_mf", "-pix_fmt", "nv12", "-rate_control", "quality", "-quality", "80");
+            else
+                Add("-c:v", "libx264", "-preset", "fast", "-crf", "22", "-pix_fmt", "yuv420p");
+            Add("-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart");
+        }
         else
             Add("-c:v", "libvpx-vp9", "-deadline", "good", "-cpu-used", "4", "-row-mt", "1",
                 "-crf", "32", "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "libopus", "-b:a", "128k");

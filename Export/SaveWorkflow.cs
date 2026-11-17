@@ -5,11 +5,12 @@ using System.Runtime.InteropServices;
 
 namespace SimpleVideoSnipper;
 
-internal sealed class SaveWorkflow(string pendingFolder, PreferencesStore store, NotifyIcon tray) : IDisposable
+internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore store,
+    SavePreferences initialPreferences, NotifyIcon tray) : IDisposable
 {
     private readonly Queue<(PendingClip Clip, bool Ask)> queue = new();
     private readonly HashSet<string> queuedPaths = new(StringComparer.OrdinalIgnoreCase);
-    private SavePreferences preferences = new();
+    private SavePreferences preferences = initialPreferences;
     private SavedRecordingNotice? notice;
     private bool processing;
     private bool choosing;
@@ -17,9 +18,8 @@ internal sealed class SaveWorkflow(string pendingFolder, PreferencesStore store,
     public bool Busy => processing || choosing;
     public string SaveFolder => preferences.Folder;
 
-    public void Start()
+    public void Start(string? warning)
     {
-        preferences = store.Load(out var warning);
         if (warning is not null)
             Notify("Saving preferences", warning);
         var count = Pending().Length;
@@ -34,17 +34,24 @@ internal sealed class SaveWorkflow(string pendingFolder, PreferencesStore store,
         choosing = true;
         try
         {
-            using var dialog = new SaveSettingsDialog(preferences);
-            if (dialog.ShowDialog() == DialogResult.OK)
+            using var dialog = new SaveSettingsDialog(preferences, storage.CurrentFolder);
+            while (dialog.ShowDialog() == DialogResult.OK)
             {
-                var next = dialog.Preferences;
-                store.Save(next);
-                preferences = next;
+                try
+                {
+                    var next = storage.WithFolder(dialog.Preferences);
+                    if (storage.IsInPendingFolder(next.Folder, next))
+                        throw new IOException("Choose a save folder outside the temporary recording files.");
+                    store.Save(next);
+                    storage.Apply(next);
+                    preferences = next;
+                    break;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+                {
+                    MessageBox.Show(exception.Message, "Could not save settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            MessageBox.Show(exception.Message, "Could not save settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -121,19 +128,21 @@ internal sealed class SaveWorkflow(string pendingFolder, PreferencesStore store,
 
     private PendingClip[] Pending()
     {
-        try
+        var clips = new List<PendingClip>();
+        foreach (var folder in storage.PendingFolders())
         {
-            return Directory.EnumerateFiles(pendingFolder)
-                .Select(path => ExportFormats.FromPath(path) is { } format ? new PendingClip(path, format) : null)
-                .OfType<PendingClip>()
-                .OrderByDescending(clip => clip.Title, StringComparer.CurrentCulture)
-                .ToArray();
+            if (!Directory.Exists(folder))
+                continue;
+            try
+            {
+                clips.AddRange(Directory.EnumerateFiles(folder).Select(PendingClip.FromFile).OfType<PendingClip>());
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Notify("Unsaved recordings", "A temporary recordings folder is unavailable.");
+            }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Notify("Unsaved recordings", "The temporary recordings folder is unavailable.");
-            return [];
-        }
+        return clips.OrderByDescending(clip => clip.Title, StringComparer.CurrentCulture).ToArray();
     }
 
     public void Enqueue(PendingClip clip, bool ask = false)
@@ -184,6 +193,8 @@ internal sealed class SaveWorkflow(string pendingFolder, PreferencesStore store,
             ExportResult result;
             try
             {
+                if (storage.IsInPendingFolder(destination.Path))
+                    throw new IOException("Choose a save location outside the temporary recording files.");
                 tray.Text = "Simple Video Snipper — Saving recording";
                 result = await Task.Run(() => RecordingExporter.SaveAsync(clip, destination));
             }

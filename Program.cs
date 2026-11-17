@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Reflection;
 
 namespace SimpleVideoSnipper;
 
@@ -9,20 +10,35 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        var profile = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "SnipperProfile")?.Value ?? "SimpleVideoSnipper";
         var appData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SimpleVideoSnipper");
+            profile);
+        using var instance = new Mutex(true, $@"Local\{profile}.Running", out var firstInstance);
+        if (!firstInstance)
+        {
+            ShowError("Simple Video Snipper is already running. Open it from the system tray.");
+            return;
+        }
 
         try
         {
-            var pendingFolder = Path.Combine(appData, "Recordings", "Pending");
-            using var tray = new RecordingTray(RecordingHost.Start(pendingFolder),
-                new PreferencesStore(Path.Combine(appData, "settings.json")), args.Contains("--open"));
+            var store = new PreferencesStore(Path.Combine(appData, "settings.json"));
+            var preferences = store.Load(out var warning);
+            var storage = new RecordingStorage(appData, profile);
+            storage.Apply(preferences);
+            using var tray = new RecordingTray(RecordingHost.Start(storage.PrepareCapture), storage,
+                store, preferences, warning, args.Contains("--open"));
             Application.Run(tray);
         }
         catch (Exception exception)
         {
             ShowError(exception.Message);
+        }
+        finally
+        {
+            instance.ReleaseMutex();
         }
     }
 
@@ -41,7 +57,8 @@ internal static class Program
         private RecordingToolbar? captureToolbar;
         private bool selecting;
 
-        public RecordingTray(RecordingHost host, PreferencesStore preferences, bool openOnLaunch)
+        public RecordingTray(RecordingHost host, RecordingStorage storage, PreferencesStore store,
+            SavePreferences preferences, string? settingsWarning, bool openOnLaunch)
         {
             this.host = host;
             menu = new ContextMenuStrip();
@@ -52,7 +69,7 @@ internal static class Program
                 ContextMenuStrip = menu,
                 Visible = true,
             };
-            saves = new SaveWorkflow(host.Folder, preferences, icon);
+            saves = new SaveWorkflow(storage, store, preferences, icon);
             var selectArea = menu.Items.Add("Record area", null, (_, _) => BeginCapture(windowMode: false));
             var selectWindow = menu.Items.Add("Record window", null, (_, _) => BeginCapture(windowMode: true));
             menu.Items.Add("Open Chrome recorder", null, (_, _) => OpenRecorder());
@@ -139,7 +156,7 @@ internal static class Program
             };
             refresh.Start();
             host.RecordingReady += OnRecordingReady;
-            window.Shown += (_, _) => saves.Start();
+            window.Shown += (_, _) => saves.Start(settingsWarning);
             if (openOnLaunch)
                 window.Shown += (_, _) => OpenRecorder();
             window.Show();
@@ -210,6 +227,7 @@ internal static class Program
                     return;
                 }
 
+                var pendingFolder = host.PrepareCaptureFolder();
                 using var toolbar = new RecordingToolbar(target, session);
                 captureToolbar = toolbar;
                 var excluded = NativeCaptureMethods.ExcludeWindow(toolbar);
@@ -223,7 +241,7 @@ internal static class Program
                         toolbar.ShowAudioWarning(message);
                     icon.ShowBalloonTip(4000, "Recording audio", message, ToolTipIcon.Warning);
                 });
-                staged = await Task.Run(() => ScreenRecorder.RecordAsync(target, audio, host.Folder,
+                staged = await Task.Run(() => ScreenRecorder.RecordAsync(target, audio, pendingFolder,
                     session.StopRequested, warnings));
             }
             catch (Exception exception)

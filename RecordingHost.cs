@@ -17,10 +17,10 @@ internal sealed class RecordingHost : IDisposable
     private readonly object sessionLock = new();
     private RecordingSession? active;
 
-    private RecordingHost(WebApplication app, string folder)
+    private RecordingHost(WebApplication app, Func<string> prepareCaptureFolder)
     {
         this.app = app;
-        Folder = folder;
+        PrepareCaptureFolder = prepareCaptureFolder;
         app.UseWebSockets();
         MapAsset("", "index.html", "text/html; charset=utf-8");
         MapAsset("recorder.js", "recorder.js", "text/javascript; charset=utf-8");
@@ -28,7 +28,7 @@ internal sealed class RecordingHost : IDisposable
         app.MapGet(route + "/record", HandleRecordingAsync);
     }
 
-    public string Folder { get; }
+    public Func<string> PrepareCaptureFolder { get; }
     public event Action<PendingClip>? RecordingReady;
 
     private string Origin => app.Urls.Single();
@@ -44,9 +44,8 @@ internal sealed class RecordingHost : IDisposable
         }
     }
 
-    public static RecordingHost Start(string folder)
+    public static RecordingHost Start(Func<string> prepareCaptureFolder)
     {
-        Directory.CreateDirectory(folder);
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
         {
             Args = [],
@@ -54,7 +53,7 @@ internal sealed class RecordingHost : IDisposable
         });
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
-        var host = new RecordingHost(builder.Build(), folder);
+        var host = new RecordingHost(builder.Build(), prepareCaptureFolder);
         host.app.StartAsync().GetAwaiter().GetResult();
         return host;
     }
@@ -124,7 +123,20 @@ internal sealed class RecordingHost : IDisposable
 
     private async Task<PendingClip?> SaveRecordingAsync(WebSocket socket, Task stopSignal, CancellationToken cancellationToken)
     {
-        var destination = PendingClip.NewPath(Folder, "Tab", ExportFormat.WebM);
+        string destination;
+        try
+        {
+            destination = PendingClip.NewPath(PrepareCaptureFolder(), "Tab", ExportFormat.WebM);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            if (socket.State == WebSocketState.Open)
+            {
+                await SendAsync(socket, "error:" + exception.Message, cancellationToken);
+                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken);
+            }
+            return null;
+        }
         var partial = destination + ".partial";
         PendingClip? result = null;
         var response = "error:No video data was received.";

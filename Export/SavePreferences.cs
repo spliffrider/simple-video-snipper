@@ -17,6 +17,8 @@ internal sealed record SavePreferences
     public ExportFormat Format { get; init; }
     public string Folder { get; init; } = DefaultFolder;
     public bool AutoCopy { get; init; }
+    public string? TemporaryFolder { get; init; }
+    public string[] PreviousTemporaryFolders { get; init; } = [];
 
     private static string VideosFolder()
     {
@@ -56,6 +58,7 @@ internal sealed class PreferencesStore(string file)
 
     public void Save(SavePreferences preferences)
     {
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         var partial = file + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {

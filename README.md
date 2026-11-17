@@ -1,12 +1,22 @@
 # Simple Video Snipper v1 build plan
 
-Simple Video Snipper is a Windows 11 x64 tray app for recording short clips. Press a global shortcut, select an area, window, or Chrome tab, and start recording. After Stop, save the clip to a chosen folder or use Quick Save. An optional setting copies the finished file to the Windows clipboard. Recordings stay on the device.
+Simple Video Snipper is a Windows x64 tray app for recording short clips. Press a global shortcut, select an area, window, or Chrome tab, and start recording. After Stop, save the clip to a chosen folder or use Quick Save. An optional setting copies the finished file to the Windows clipboard. Recordings stay on the device.
 
 The [macOS build plan](docs/macos-build-plan.md) covers the native Mac implementation and the shared Chrome recorder.
 
+## Install on Windows
+
+Run the Windows x64 setup on Windows 10 22H2 or Windows 11. On first install, confirm the default temporary recordings folder or browse to another local folder. Setup tests that it can write and delete a file there. The installer uses your Windows account and includes the app runtime and FFmpeg. Chrome is needed for Chrome tab recording.
+
+Change the temporary location in **Settings → Temporary recordings**. New recordings go to the new folder, and **Unsaved recordings** still lists clips in earlier folders. To upgrade, exit Simple Video Snipper from the tray and run the new setup. Upgrade and uninstall preserve settings and recordings.
+
+To build setup from source, install the .NET 10 SDK and Inno Setup 6.7 or newer. Run `.\installer\Build-Installer.ps1` from the repository root. The script publishes a self-contained Windows x64 app, verifies the pinned FFmpeg archive, and writes setup to `.tools\installer\dist`. The build produces an unsigned installer. [Inno Setup downloads](https://jrsoftware.org/inno-setup/downloads) · [.NET self-contained deployment](https://learn.microsoft.com/en-us/dotnet/core/deploying/)
+
+For repeatable clean-install and upgrade tests, build two versions with the same unused `-Profile SimpleVideoSnipper.SetupCheck` value, such as `0.1.0` and `0.1.1`. Pass those executables to `installer/Test-Installer.ps1` with the profile and upgrade version. The tests use a separate installation identity and preserve your regular app data.
+
 ## Try area or window recording
 
-Run `dotnet run -c Release` with the .NET 10 SDK on Windows 11.
+Run `dotnet run -c Release` with the .NET 10 SDK.
 
 1. For an area, move the pointer to the display you want and press **Ctrl+Alt+R**, or choose **Record area**. Draw a rectangle, adjust it with its lower-right handle, and choose **Continue**. For a window, choose **Record window**, select an app window, and choose **Continue**.
 2. Turn on **Microphone**, **System audio**, or both before choosing **Record**. Both start off. Select a mic and check its level. For system audio, choose the output the sound is playing through. The list initially selects the Windows default.
@@ -26,9 +36,9 @@ Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
 
 Open **Settings** in the app or **Save settings** in the tray to set the preferred folder, format, and clipboard behavior. **Ask every time** opens the Windows Save As dialog after each recording. **Quick Save** uses your preferences and adds a numeric suffix if the filename is taken. The defaults are Ask every time, MP4, `Videos\Simple Video Snipper`, and auto-copy off.
 
-Both native and Chrome recordings can be exported as MP4 or WebM. Cross-format export uses a Windows [FFmpeg build](https://ffmpeg.org/download.html) with `libx264`, `libvpx-vp9`, `libopus`, and AAC. Put `ffmpeg.exe` beside the app, on PATH before launching, or in `.tools/ffmpeg.exe` before a local build. A same-format save preserves the existing encoding. WebM is remuxed when FFmpeg is available so playback can seek by time.
+Both native and Chrome recordings can be exported as MP4 or WebM. The installer bundles a shared FFmpeg build that uses Windows Media Foundation for H.264. When running from source, put an [FFmpeg build](https://ffmpeg.org/download.html) with `libx264`, `libvpx-vp9`, `libopus`, and AAC on PATH or in `.tools/ffmpeg.exe` before building. A same-format save preserves the existing encoding. WebM is remuxed when FFmpeg is available so playback can seek by time.
 
-If saving fails, choose **Retry**, **Save As**, or **Keep for later**. To resume after closing the dialog or restarting, open **Unsaved recordings** in the tray. Completed recordings wait in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings\Pending`. Successful saves offer **Open**, **Show in folder**, and **Copy video file**. The clipboard receives the saved file so it can be pasted into apps that accept files. Earlier prototype clips remain in the parent `Recordings` folder.
+If saving fails, choose **Retry**, **Save As**, or **Keep for later**. To resume after closing the dialog or restarting, open **Unsaved recordings** in the tray. Completed recordings wait in a subfolder of the temporary recordings location. Successful saves offer **Open**, **Show in folder**, and **Copy video file**. The clipboard receives the saved file so it can be pasted into apps that accept files. Earlier prototype clips remain in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`.
 
 ## Capture flow and defaults
 
@@ -40,7 +50,7 @@ If saving fails, choose **Retry**, **Save As**, or **Keep for later**. To resume
 
 ## Temporary recordings setup
 
-Add a **Temporary recordings folder** page to the per-user installer. Prefill `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings` and require the user to confirm it or choose another local folder. Use the copy “This is where recordings are held until you save or discard them.” Create the directory and run a create, write, and delete test with the installing user’s permissions. Keep the user on the page with an actionable error if the test fails. Persist the path in per-user settings and let users change it under **Settings → Storage**. Upgrades reuse the chosen path. [Inno Setup directory page](https://jrsoftware.org/inno-setup/documentation/topic_isxfunc_createinputdirpage.htm) · [Per-user install mode](https://jrsoftware.org/inno-setup/documentation/topic_setup_privilegesrequired.htm)
+On first install, the **Temporary recordings folder** page prefills `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`. Confirm it or choose another local folder. Setup creates a subfolder for pending clips and tests it with the installing user’s permissions. If the test fails, setup shows an error and lets you choose another folder. Upgrades reuse the chosen path. [Inno Setup directory page](https://jrsoftware.org/inno-setup/documentation/topic_isxfunc_createinputdirpage.htm) · [Per-user install mode](https://jrsoftware.org/inno-setup/documentation/topic_setup_privilegesrequired.htm)
 
 Check access and free space before Record. Write each session to an app-owned temporary file as it records. Export via a partial file in the destination folder and publish the final filename only after the write succeeds. If export fails, retain the staged clip and offer **Retry**, **Save As**, or **Discard**. Reopen finalized unsaved clips on the next launch. Remove only the app’s temporary clip after successful export or explicit discard. A storage setting change applies to new captures and preserves access to pending clips from the old folder.
 
