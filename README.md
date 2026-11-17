@@ -11,7 +11,7 @@ Run `dotnet run -c Release` with the .NET 10 SDK on Windows 11.
 1. For an area, move the pointer to the display you want and press **Ctrl+Alt+R**, or choose **Record area**. Draw a rectangle, adjust it with its lower-right handle, and choose **Continue**. For a window, choose **Record window**, select an app window, and choose **Continue**.
 2. Turn on **Microphone**, **System audio**, or both before choosing **Record**. Both start off. Select a mic and check its level. For system audio, choose the output the sound is playing through. The list initially selects the Windows default.
 3. Use the floating **Stop recording** button or the tray menu. The shortcut brings the recording controls forward. If the selected window resizes, the video keeps its original dimensions and fits the new window inside the frame.
-4. Choose **Open recordings folder** in the tray for the H.264 MP4 in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`. If either audio source was enabled, the file contains one AAC mix.
+4. Finish in the desktop save flow. Recordings with audio contain one mix.
 
 ## Try the Chrome recording prototype
 
@@ -20,7 +20,15 @@ Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
 1. Click **Open Chrome recorder** in the desktop window or tray menu.
 2. Select **Include tab audio**, **Include microphone**, or both. Click **Choose tab** and select the Chrome tab you want to record. Enable tab audio in Chrome’s sharing dialog if needed. Chrome prompts for the microphone if you selected it.
 3. Click **Record**. Keep the recorder page open and use **Stop recording** on the page, in the desktop window, or in the tray.
-4. Open the `.webm` from **Open recordings folder** in the tray. The prototype saves directly to `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`. An interrupted transfer can leave a `.webm.partial` with the bytes received so far.
+4. Finish in the desktop save flow. Once Chrome says recording finished, the app holds the recording locally and you can close the companion tab.
+
+## Save and share recordings
+
+Open **Settings** in the app or **Save settings** in the tray to set the preferred folder, format, and clipboard behavior. **Ask every time** opens the Windows Save As dialog after each recording. **Quick Save** uses your preferences and adds a numeric suffix if the filename is taken. The defaults are Ask every time, MP4, `Videos\Simple Video Snipper`, and auto-copy off.
+
+Both native and Chrome recordings can be exported as MP4 or WebM. Cross-format export uses a Windows [FFmpeg build](https://ffmpeg.org/download.html) with `libx264`, `libvpx-vp9`, `libopus`, and AAC. Put `ffmpeg.exe` beside the app, on PATH before launching, or in `.tools/ffmpeg.exe` before a local build. A same-format save preserves the existing encoding. WebM is remuxed when FFmpeg is available so playback can seek by time.
+
+If saving fails, choose **Retry**, **Save As**, or **Keep for later**. To resume after closing the dialog or restarting, open **Unsaved recordings** in the tray. Completed recordings wait in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings\Pending`. Successful saves offer **Open**, **Show in folder**, and **Copy video file**. The clipboard receives the saved file so it can be pasted into apps that accept files. Earlier prototype clips remain in the parent `Recordings` folder.
 
 ## Capture flow and defaults
 

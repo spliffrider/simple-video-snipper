@@ -2,6 +2,10 @@
 
 Build a native macOS menu bar app with the same capture, save, and share flow as the [Windows version](../README.md). Use Swift, SwiftUI, and AppKit under `macos/` in this repository. Start with a macOS 15 minimum deployment target and Xcode 16 or newer. Use a stable bundle identifier throughout development so macOS can associate capture permissions with the app. [Apple’s ScreenCaptureKit sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)
 
+## Start from Codex on the Mac
+
+Clone this repository or pull the latest `main` with your GitHub account, then work on a Mac-specific branch under `macos/`. Check Xcode and the macOS SDK first. Build an area-to-MP4 spike that records a local color grid, decode the four corners, and exercise Stop before building the full menu bar UI. Use the Windows implementation to match behavior and defaults. The [Windows README](../README.md#save-and-share-recordings) describes the shared save experience, and the [Windows export workflow](../Export/SaveWorkflow.cs) shows the retry and recovery actions. The Windows installer is the next Windows milestone.
+
 ## Build the first working recorder
 
 1. Create a SwiftUI `MenuBarExtra` with **Record Area**, **Record Window**, **Record Chrome Tab**, **Stop**, and **Settings**. Use a system-wide shortcut through the KeyboardShortcuts Swift package. Start with configurable `⌃⌥⇧R`. A shortcut pressed during capture brings the recording controls forward. Keep a menu action available when the shortcut is unavailable. [KeyboardShortcuts package](https://github.com/sindresorhus/KeyboardShortcuts)
@@ -17,7 +21,7 @@ Use the macOS screen recording permission flow. Request mic access when the mic 
 
 ## Reuse the Chrome companion
 
-Serve the existing [Companion files](../Companion/) on an ephemeral loopback port. Read [the Windows recording host](../RecordingHost.cs) for the contract. The browser opens a session-scoped WebSocket, receives `ready`, sends binary WebM chunks in order, and sends `finish` after the final chunk. The desktop app can send `stop` and acknowledges a successful save with `saved:<filename>`. Match the incoming Origin to the local page, use an unpredictable session path, and accept one recording at a time. The browser permission picker selects the actual tab. Open Chrome explicitly from the menu bar and verify that switching tabs leaves the recording on the selected tab. [Chrome source picker](https://developer.chrome.com/docs/web-platform/screen-sharing-controls)
+Serve the existing [Companion files](../Companion/) on an ephemeral loopback port. Read [the Windows recording host](../RecordingHost.cs) for the contract. The browser opens a session-scoped WebSocket, receives `ready`, sends binary WebM chunks in order, and sends `finish` after the final chunk. The desktop app can send `stop`. After finalizing the staged copy, reply `staged:<title>` and send the clip through the same save flow as native recordings. On a capture failure, reply with `error:<message>`. Match the incoming Origin to the local page, use an unpredictable session path, and accept one recording at a time. The browser permission picker selects the actual tab. Open Chrome explicitly from the menu bar and verify that switching tabs leaves the recording on the selected tab. [Chrome source picker](https://developer.chrome.com/docs/web-platform/screen-sharing-controls)
 
 ## Save, share, and package
 

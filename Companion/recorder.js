@@ -163,7 +163,7 @@ async function startRecording() {
       if (socket === connection) {
         releaseTracks();
         if (connection.readyState === WebSocket.OPEN) {
-          render("finishing", "Saving the clip to the local recordings folder…");
+          render("finishing", "Preparing the recording in the desktop app…");
           connection.send("finish");
         } else {
           reset("The connection closed before the clip could finish saving.");
@@ -184,6 +184,8 @@ async function startRecording() {
         }
       } else if (data === "stop") {
         stopRecording();
+      } else if (data.startsWith("staged:")) {
+        reset("Recording finished. Check the desktop app for saving options.");
       } else if (data.startsWith("saved:")) {
         reset(`Saved in the local recordings folder. ${data.slice(6)}`);
       } else if (data.startsWith("error:")) {

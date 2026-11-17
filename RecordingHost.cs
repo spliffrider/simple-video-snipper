@@ -29,6 +29,7 @@ internal sealed class RecordingHost : IDisposable
     }
 
     public string Folder { get; }
+    public event Action<PendingClip>? RecordingReady;
 
     private string Origin => app.Urls.Single();
 
@@ -105,28 +106,33 @@ internal sealed class RecordingHost : IDisposable
             return;
         }
 
-        using var session = TryStartRecording();
+        var session = TryStartRecording();
         if (session is null)
         {
             context.Response.StatusCode = StatusCodes.Status409Conflict;
             return;
         }
 
-        using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        await SaveRecordingAsync(socket, session.StopRequested, context.RequestAborted);
+        PendingClip? clip;
+        using (session)
+        using (var socket = await context.WebSockets.AcceptWebSocketAsync())
+            clip = await SaveRecordingAsync(socket, session.StopRequested, context.RequestAborted);
+
+        if (clip is not null)
+            RecordingReady?.Invoke(clip);
     }
 
-    private async Task SaveRecordingAsync(WebSocket socket, Task stopSignal, CancellationToken cancellationToken)
+    private async Task<PendingClip?> SaveRecordingAsync(WebSocket socket, Task stopSignal, CancellationToken cancellationToken)
     {
-        var name = $"Tab {DateTime.Now:yyyy-MM-dd HH-mm-ss} {Guid.NewGuid():N}.webm";
-        var destination = Path.Combine(Folder, name);
+        var destination = PendingClip.NewPath(Folder, "Tab", ExportFormat.WebM);
         var partial = destination + ".partial";
-        var hasData = false;
+        PendingClip? result = null;
         var response = "error:No video data was received.";
 
         try
         {
             bool finished;
+            bool hasData;
             await using (var file = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                 bufferSize: 64 * 1024, useAsync: true))
             {
@@ -138,7 +144,8 @@ internal sealed class RecordingHost : IDisposable
             if (finished && hasData)
             {
                 File.Move(partial, destination);
-                response = "saved:" + name;
+                result = new PendingClip(destination, ExportFormat.WebM);
+                response = "staged:" + result.Title;
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -147,11 +154,11 @@ internal sealed class RecordingHost : IDisposable
         }
         catch (WebSocketException)
         {
-            return;
+            return null;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return;
+            return null;
         }
         finally
         {
@@ -159,15 +166,21 @@ internal sealed class RecordingHost : IDisposable
             TryRemoveEmptyFile(partial);
         }
 
-        if (socket.State == WebSocketState.Open)
+        try
         {
-            await SendAsync(socket, response, cancellationToken);
-            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken);
+            if (socket.State == WebSocketState.Open)
+                await SendAsync(socket, response, cancellationToken);
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken);
         }
-        else if (socket.State == WebSocketState.CloseReceived)
+        catch (WebSocketException)
         {
-            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken);
+            // A closed browser tab does not undo a finalized recording.
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        return result;
     }
 
     private static async Task<bool> ReceiveAsync(WebSocket socket, FileStream file, Task stopSignal,

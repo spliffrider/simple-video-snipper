@@ -119,8 +119,7 @@ internal static class ScreenRecorder
         };
 
         var mode = target.IsWindow ? "Window" : "Area";
-        var name = $"{mode} {DateTime.Now:yyyy-MM-dd HH-mm-ss} {Guid.NewGuid():N}.mp4";
-        var destination = Path.Combine(folder, name);
+        var destination = PendingClip.NewPath(folder, mode, ExportFormat.Mp4);
         var partial = destination + ".partial";
         await using (var stream = new FileStream(partial, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
         {

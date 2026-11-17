@@ -9,13 +9,15 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        var folder = Path.Combine(
+        var appData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SimpleVideoSnipper", "Recordings");
+            "SimpleVideoSnipper");
 
         try
         {
-            using var tray = new RecordingTray(RecordingHost.Start(folder), args.Contains("--open"));
+            var pendingFolder = Path.Combine(appData, "Recordings", "Pending");
+            using var tray = new RecordingTray(RecordingHost.Start(pendingFolder),
+                new PreferencesStore(Path.Combine(appData, "settings.json")), args.Contains("--open"));
             Application.Run(tray);
         }
         catch (Exception exception)
@@ -35,28 +37,14 @@ internal static class Program
         private readonly Form window;
         private readonly System.Windows.Forms.Timer refresh;
         private readonly GlobalCaptureShortcut shortcut;
+        private readonly SaveWorkflow saves;
         private RecordingToolbar? captureToolbar;
         private bool selecting;
 
-        public RecordingTray(RecordingHost host, bool openOnLaunch)
+        public RecordingTray(RecordingHost host, PreferencesStore preferences, bool openOnLaunch)
         {
             this.host = host;
             menu = new ContextMenuStrip();
-            var selectArea = menu.Items.Add("Record area", null, (_, _) => BeginCapture(windowMode: false));
-            var selectWindow = menu.Items.Add("Record window", null, (_, _) => BeginCapture(windowMode: true));
-            menu.Items.Add("Open Chrome recorder", null, (_, _) => OpenRecorder());
-            var stop = menu.Items.Add("Stop recording", null, (_, _) => host.RequestStop());
-            menu.Items.Add("Open recordings folder", null, (_, _) => Open(host.Folder));
-            menu.Items.Add(new ToolStripSeparator());
-            var exit = menu.Items.Add("Exit", null, (_, _) => ExitThread());
-            menu.Opening += (_, _) =>
-            {
-                selectArea.Enabled = !selecting && !host.IsRecording;
-                selectWindow.Enabled = selectArea.Enabled;
-                stop.Enabled = host.IsRecording;
-                exit.Enabled = !selecting && !host.IsRecording;
-            };
-
             icon = new NotifyIcon
             {
                 Text = "Simple Video Snipper",
@@ -64,6 +52,25 @@ internal static class Program
                 ContextMenuStrip = menu,
                 Visible = true,
             };
+            saves = new SaveWorkflow(host.Folder, preferences, icon);
+            var selectArea = menu.Items.Add("Record area", null, (_, _) => BeginCapture(windowMode: false));
+            var selectWindow = menu.Items.Add("Record window", null, (_, _) => BeginCapture(windowMode: true));
+            menu.Items.Add("Open Chrome recorder", null, (_, _) => OpenRecorder());
+            var stop = menu.Items.Add("Stop recording", null, (_, _) => host.RequestStop());
+            var settings = menu.Items.Add("Save settings…", null, (_, _) => saves.ShowSettings());
+            var pending = menu.Items.Add("Unsaved recordings…", null, (_, _) => saves.ShowPending());
+            menu.Items.Add("Open save folder", null, (_, _) => saves.OpenSaveFolder());
+            menu.Items.Add(new ToolStripSeparator());
+            var exit = menu.Items.Add("Exit", null, (_, _) => ExitThread());
+            menu.Opening += (_, _) =>
+            {
+                selectArea.Enabled = !selecting && !host.IsRecording && !saves.Busy;
+                selectWindow.Enabled = selectArea.Enabled;
+                stop.Enabled = host.IsRecording;
+                settings.Enabled = pending.Enabled = !selecting && !host.IsRecording && !saves.Busy;
+                exit.Enabled = !selecting && !host.IsRecording && !saves.Busy;
+            };
+
             var areaButton = new Button { Text = "Record area", AutoSize = true };
             areaButton.Click += (_, _) => BeginCapture(windowMode: false);
             var windowButton = new Button { Text = "Record window", AutoSize = true };
@@ -72,6 +79,8 @@ internal static class Program
             openButton.Click += (_, _) => OpenRecorder();
             var stopButton = new Button { Text = "Stop recording", AutoSize = true, Enabled = false };
             stopButton.Click += (_, _) => host.RequestStop();
+            var settingsButton = new Button { Text = "Settings", AutoSize = true };
+            settingsButton.Click += (_, _) => saves.ShowSettings();
             var actions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -84,15 +93,15 @@ internal static class Program
                 AutoSize = true,
                 Margin = new Padding(3, 8, 3, 3),
             };
-            actions.Controls.AddRange([areaButton, windowButton, openButton, stopButton, shortcutLabel]);
-            actions.SetFlowBreak(stopButton, true);
+            actions.Controls.AddRange([areaButton, windowButton, openButton, stopButton, settingsButton, shortcutLabel]);
+            actions.SetFlowBreak(settingsButton, true);
             if (shortcut.IsRegistered)
                 selectArea.Text = "Record area (Ctrl+Alt+R)";
 
             window = new Form
             {
                 Text = "Simple Video Snipper",
-                ClientSize = new Size(535, 90),
+                ClientSize = new Size(615, 90),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 AutoScaleMode = AutoScaleMode.Dpi,
@@ -122,13 +131,31 @@ internal static class Program
             {
                 var recording = host.IsRecording;
                 stopButton.Enabled = recording;
-                areaButton.Enabled = !recording;
-                windowButton.Enabled = !recording;
+                areaButton.Enabled = !recording && !saves.Busy;
+                windowButton.Enabled = areaButton.Enabled;
+                settingsButton.Enabled = !recording && !selecting && !saves.Busy;
+                if (!recording && !selecting)
+                    saves.ProcessReady();
             };
             refresh.Start();
+            host.RecordingReady += OnRecordingReady;
+            window.Shown += (_, _) => saves.Start();
             if (openOnLaunch)
                 window.Shown += (_, _) => OpenRecorder();
             window.Show();
+        }
+
+        private void OnRecordingReady(PendingClip clip)
+        {
+            try
+            {
+                if (window.IsHandleCreated && !window.IsDisposed)
+                    window.BeginInvoke(() => saves.Enqueue(clip));
+            }
+            catch (InvalidOperationException) when (!window.IsHandleCreated || window.IsDisposed)
+            {
+                // The finalized clip will be available in Unsaved recordings on the next launch.
+            }
         }
 
         private void OpenRecorder() => Open("chrome.exe", host.RecorderUrl);
@@ -140,7 +167,7 @@ internal static class Program
                 captureToolbar.Activate();
                 return;
             }
-            if (selecting)
+            if (selecting || saves.Busy)
                 return;
             if (host.IsRecording)
             {
@@ -150,6 +177,7 @@ internal static class Program
             }
 
             var showWindowOnCancel = window.Visible;
+            string? staged = null;
             window.Hide();
             try
             {
@@ -195,10 +223,8 @@ internal static class Program
                         toolbar.ShowAudioWarning(message);
                     icon.ShowBalloonTip(4000, "Recording audio", message, ToolTipIcon.Warning);
                 });
-                var saved = await Task.Run(() => ScreenRecorder.RecordAsync(target, audio, host.Folder,
+                staged = await Task.Run(() => ScreenRecorder.RecordAsync(target, audio, host.Folder,
                     session.StopRequested, warnings));
-                if (saved is not null)
-                    icon.ShowBalloonTip(4000, "Recording saved", Path.GetFileName(saved), ToolTipIcon.Info);
             }
             catch (Exception exception)
             {
@@ -208,6 +234,8 @@ internal static class Program
             {
                 captureToolbar = null;
             }
+            if (staged is not null)
+                saves.Enqueue(new PendingClip(staged, ExportFormat.Mp4));
         }
 
         private static CaptureTarget? ChooseArea()
@@ -244,8 +272,10 @@ internal static class Program
             if (disposing)
             {
                 refresh.Dispose();
+                host.RecordingReady -= OnRecordingReady;
                 shortcut.Dispose();
                 window.Dispose();
+                saves.Dispose();
                 icon.Dispose();
                 menu.Dispose();
                 host.Dispose();
