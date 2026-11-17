@@ -2,13 +2,14 @@ using System.Diagnostics;
 
 namespace SimpleVideoSnipper;
 
-internal sealed class AreaRecordingToolbar : Form
+internal sealed class RecordingToolbar : Form
 {
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 250 };
+    private readonly Label warning = new() { AutoSize = true };
 
-    public AreaRecordingToolbar(SelectedArea area, RecordingHost.RecordingSession session)
+    public RecordingToolbar(CaptureTarget target, RecordingHost.RecordingSession session)
     {
-        Text = "Area recording";
+        Text = target.IsWindow ? "Window recording" : "Area recording";
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
         TopMost = true;
@@ -16,7 +17,7 @@ internal sealed class AreaRecordingToolbar : Form
         StartPosition = FormStartPosition.Manual;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        Location = area.Display.Location;
+        Location = Screen.FromRectangle(target.Bounds).Bounds.Location;
 
         var clock = Stopwatch.StartNew();
         var elapsed = new Label { Text = "Recording  00:00", AutoSize = true, Anchor = AnchorStyles.Left };
@@ -37,10 +38,10 @@ internal sealed class AreaRecordingToolbar : Form
             WrapContents = false,
             Padding = new Padding(8),
         };
-        controls.Controls.AddRange([elapsed, button]);
+        controls.Controls.AddRange([elapsed, button, warning]);
         Controls.Add(controls);
 
-        Shown += (_, _) => PlaceOutsideSelection(area);
+        Shown += (_, _) => PlaceOutsideSelection(target.Bounds);
         timer.Tick += (_, _) =>
         {
             var finishing = session.StopRequested.IsCompleted;
@@ -52,10 +53,11 @@ internal sealed class AreaRecordingToolbar : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    private void PlaceOutsideSelection(SelectedArea area)
+    public void ShowAudioWarning(string message) => warning.Text = message;
+
+    private void PlaceOutsideSelection(Rectangle region)
     {
-        var work = Screen.FromRectangle(area.Display).WorkingArea;
-        var region = area.DesktopRegion;
+        var work = Screen.FromRectangle(region).WorkingArea;
         var x = Math.Clamp(region.Left, work.Left, Math.Max(work.Left, work.Right - Width));
         var y = Math.Clamp(region.Top, work.Top, Math.Max(work.Top, work.Bottom - Height));
         Point[] positions =

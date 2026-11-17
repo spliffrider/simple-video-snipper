@@ -55,7 +55,7 @@ internal sealed class AreaSelectionOverlay : Form
         DoubleBuffered = true;
         Cursor = Cursors.Cross;
 
-        var record = new Button { Text = "Record", AutoSize = true, DialogResult = DialogResult.OK };
+        var record = new Button { Text = "Continue", AutoSize = true, DialogResult = DialogResult.OK };
         var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
         actions = new FlowLayoutPanel
         {

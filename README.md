@@ -4,21 +4,21 @@ Simple Video Snipper is a Windows 11 x64 tray app for recording short clips. Pre
 
 The [macOS build plan](docs/macos-build-plan.md) covers the native Mac implementation and the shared Chrome recorder.
 
-## Try the area recording prototype
+## Try area or window recording
 
 Run `dotnet run -c Release` with the .NET 10 SDK on Windows 11.
 
-1. Move the pointer to the display you want to capture and press **Ctrl+Alt+R**. You can also choose **Record area** in the app or tray menu.
-2. Drag to draw a rectangle. Draw again or drag its lower-right handle to adjust it. Press **Esc** to cancel.
-3. Choose **Record**, then use the floating **Stop recording** button or the tray menu. The shortcut brings the recording controls forward while a capture is running.
-4. Choose **Open recordings folder** in the tray to find the silent H.264 MP4 in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`.
+1. For an area, move the pointer to the display you want and press **Ctrl+Alt+R**, or choose **Record area**. Draw a rectangle, adjust it with its lower-right handle, and choose **Continue**. For a window, choose **Record window**, select an app window, and choose **Continue**.
+2. Turn on **Microphone**, **System audio**, or both before choosing **Record**. Both start off. Select a mic and check its level. For system audio, choose the output the sound is playing through. The list initially selects the Windows default.
+3. Use the floating **Stop recording** button or the tray menu. The shortcut brings the recording controls forward. If the selected window resizes, the video keeps its original dimensions and fits the new window inside the frame.
+4. Choose **Open recordings folder** in the tray for the H.264 MP4 in `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`. If either audio source was enabled, the file contains one AAC mix.
 
 ## Try the Chrome recording prototype
 
 Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
 
 1. Click **Open Chrome recorder** in the desktop window or tray menu.
-2. Turn on **Include tab audio**, click **Choose tab**, and select the Chrome tab you want to record. Enable audio in Chrome’s sharing dialog if needed.
+2. Select **Include tab audio**, **Include microphone**, or both. Click **Choose tab** and select the Chrome tab you want to record. Enable tab audio in Chrome’s sharing dialog if needed. Chrome prompts for the microphone if you selected it.
 3. Click **Record**. Keep the recorder page open and use **Stop recording** on the page, in the desktop window, or in the tray.
 4. Open the `.webm` from **Open recordings folder** in the tray. The prototype saves directly to `%LOCALAPPDATA%\SimpleVideoSnipper\Recordings`. An interrupted transfer can leave a `.webm.partial` with the bytes received so far.
 

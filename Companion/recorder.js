@@ -1,6 +1,7 @@
 "use strict";
 
 const audio = document.querySelector("#audio");
+const microphone = document.querySelector("#microphone");
 const action = document.querySelector("#action");
 const cancel = document.querySelector("#cancel");
 const statusLine = document.querySelector("#status");
@@ -9,6 +10,9 @@ const maxBufferedBytes = 32 * 1024 * 1024;
 
 let phase = "idle";
 let stream;
+let inputMic;
+let mixedStream;
+let mixer;
 let recorder;
 let socket;
 
@@ -25,12 +29,19 @@ function render(nextPhase, message) {
   action.disabled = !["idle", "ready", "recording"].includes(phase);
   cancel.hidden = phase !== "ready";
   audio.disabled = phase !== "idle";
+  microphone.disabled = phase !== "idle";
   statusLine.textContent = message;
 }
 
 function releaseTracks() {
   stream?.getTracks().forEach(track => track.stop());
+  inputMic?.getTracks().forEach(track => track.stop());
+  mixedStream?.getAudioTracks().forEach(track => track.stop());
+  void mixer?.close();
   stream = undefined;
+  inputMic = undefined;
+  mixedStream = undefined;
+  mixer = undefined;
 }
 
 function reset(message) {
@@ -48,6 +59,7 @@ function reset(message) {
 
 async function chooseTab() {
   render("choosing", "Select a Chrome tab in the share dialog.");
+  let requestingMicrophone = false;
   try {
     const controller = typeof CaptureController === "function" ? new CaptureController() : undefined;
     stream = await navigator.mediaDevices.getDisplayMedia({
@@ -69,6 +81,22 @@ async function chooseTab() {
       reset("Tab audio was requested. Choose the tab again and enable audio in Chrome’s share dialog.");
       return;
     }
+    if (microphone.checked) {
+      render("choosing", "Allow Chrome to use your microphone.");
+      requestingMicrophone = true;
+      inputMic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (videoTrack.readyState !== "live") {
+        reset("Chrome stopped sharing the tab. Choose a tab to try again.");
+        return;
+      }
+      inputMic.getAudioTracks()[0].addEventListener("ended", () => {
+        if (phase === "recording") {
+          render("recording", "The microphone became unavailable. Tab recording is continuing.");
+        } else if (phase === "ready" || phase === "connecting") {
+          reset("The microphone became unavailable. Choose the tab to try again.");
+        }
+      }, { once: true });
+    }
     videoTrack.addEventListener("ended", () => {
       if (phase === "recording") {
         stopRecording();
@@ -76,19 +104,39 @@ async function chooseTab() {
         reset("Chrome stopped sharing the tab. Choose a tab to try again.");
       }
     }, { once: true });
-    render("ready", audio.checked ? "Tab selected. Tab audio is enabled." : "Tab selected.");
+    const sources = [audio.checked && "tab audio", microphone.checked && "microphone"].filter(Boolean);
+    render("ready", sources.length ? `Tab selected. Audio sources: ${sources.join(" and ")}.` : "Tab selected.");
   } catch (error) {
-    reset(error.name === "NotAllowedError"
+    reset(requestingMicrophone ? `Could not use the microphone. ${error.message}` : error.name === "NotAllowedError"
       ? "Tab selection was canceled or blocked by Chrome."
       : `Could not select a tab. ${error.message}`);
   }
 }
 
-function startRecording() {
+async function startRecording() {
   render("connecting", "Connecting to the desktop app…");
   try {
-    const type = audio.checked ? mimeType : "video/webm;codecs=vp8";
-    const media = new MediaRecorder(stream, { mimeType: type });
+    let recordingStream = stream;
+    if (inputMic) {
+      mixer = new AudioContext();
+      const destination = mixer.createMediaStreamDestination();
+      const sources = audio.checked ? [stream, inputMic] : [inputMic];
+      for (const input of sources) {
+        const gain = mixer.createGain();
+        gain.gain.value = 1 / sources.length;
+        mixer.createMediaStreamSource(input).connect(gain).connect(destination);
+      }
+      mixedStream = new MediaStream([...stream.getVideoTracks(), ...destination.stream.getAudioTracks()]);
+      const current = mixer;
+      await current.resume();
+      if (mixer !== current) {
+        return;
+      }
+      recordingStream = mixedStream;
+    }
+    const hasAudio = recordingStream.getAudioTracks().length > 0;
+    const type = hasAudio ? mimeType : "video/webm;codecs=vp8";
+    const media = new MediaRecorder(recordingStream, { mimeType: type });
     const endpoint = new URL("record", location.href);
     endpoint.protocol = "ws:";
     const connection = new WebSocket(endpoint);
@@ -130,7 +178,7 @@ function startRecording() {
       if (data === "ready") {
         try {
           media.start(1000);
-          render("recording", audio.checked ? "Recording tab with audio." : "Recording tab.");
+          render("recording", hasAudio ? "Recording tab with audio." : "Recording tab.");
         } catch (error) {
           reset(`Could not start recording. ${error.message}`);
         }
@@ -165,7 +213,7 @@ action.addEventListener("click", () => {
   if (phase === "idle") {
     void chooseTab();
   } else if (phase === "ready") {
-    startRecording();
+    void startRecording();
   } else if (phase === "recording") {
     stopRecording();
   }

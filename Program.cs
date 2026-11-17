@@ -35,14 +35,15 @@ internal static class Program
         private readonly Form window;
         private readonly System.Windows.Forms.Timer refresh;
         private readonly GlobalCaptureShortcut shortcut;
-        private AreaRecordingToolbar? areaToolbar;
+        private RecordingToolbar? captureToolbar;
         private bool selecting;
 
         public RecordingTray(RecordingHost host, bool openOnLaunch)
         {
             this.host = host;
             menu = new ContextMenuStrip();
-            var selectArea = menu.Items.Add("Record area", null, (_, _) => BeginAreaCapture());
+            var selectArea = menu.Items.Add("Record area", null, (_, _) => BeginCapture(windowMode: false));
+            var selectWindow = menu.Items.Add("Record window", null, (_, _) => BeginCapture(windowMode: true));
             menu.Items.Add("Open Chrome recorder", null, (_, _) => OpenRecorder());
             var stop = menu.Items.Add("Stop recording", null, (_, _) => host.RequestStop());
             menu.Items.Add("Open recordings folder", null, (_, _) => Open(host.Folder));
@@ -51,6 +52,7 @@ internal static class Program
             menu.Opening += (_, _) =>
             {
                 selectArea.Enabled = !selecting && !host.IsRecording;
+                selectWindow.Enabled = selectArea.Enabled;
                 stop.Enabled = host.IsRecording;
                 exit.Enabled = !selecting && !host.IsRecording;
             };
@@ -63,7 +65,9 @@ internal static class Program
                 Visible = true,
             };
             var areaButton = new Button { Text = "Record area", AutoSize = true };
-            areaButton.Click += (_, _) => BeginAreaCapture();
+            areaButton.Click += (_, _) => BeginCapture(windowMode: false);
+            var windowButton = new Button { Text = "Record window", AutoSize = true };
+            windowButton.Click += (_, _) => BeginCapture(windowMode: true);
             var openButton = new Button { Text = "Open Chrome recorder", AutoSize = true };
             openButton.Click += (_, _) => OpenRecorder();
             var stopButton = new Button { Text = "Stop recording", AutoSize = true, Enabled = false };
@@ -73,14 +77,14 @@ internal static class Program
                 Dock = DockStyle.Fill,
                 Padding = new Padding(12),
             };
-            shortcut = new GlobalCaptureShortcut(BeginAreaCapture);
+            shortcut = new GlobalCaptureShortcut(() => BeginCapture(windowMode: false));
             var shortcutLabel = new Label
             {
                 Text = shortcut.IsRegistered ? "Area shortcut: Ctrl+Alt+R" : "Ctrl+Alt+R is unavailable. Use Record area.",
                 AutoSize = true,
                 Margin = new Padding(3, 8, 3, 3),
             };
-            actions.Controls.AddRange([areaButton, openButton, stopButton, shortcutLabel]);
+            actions.Controls.AddRange([areaButton, windowButton, openButton, stopButton, shortcutLabel]);
             actions.SetFlowBreak(stopButton, true);
             if (shortcut.IsRegistered)
                 selectArea.Text = "Record area (Ctrl+Alt+R)";
@@ -88,7 +92,7 @@ internal static class Program
             window = new Form
             {
                 Text = "Simple Video Snipper",
-                ClientSize = new Size(440, 90),
+                ClientSize = new Size(535, 90),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 AutoScaleMode = AutoScaleMode.Dpi,
@@ -96,9 +100,9 @@ internal static class Program
             };
             icon.DoubleClick += (_, _) =>
             {
-                if (areaToolbar is not null)
+                if (captureToolbar is not null)
                 {
-                    areaToolbar.Activate();
+                    captureToolbar.Activate();
                     return;
                 }
                 window.Show();
@@ -119,6 +123,7 @@ internal static class Program
                 var recording = host.IsRecording;
                 stopButton.Enabled = recording;
                 areaButton.Enabled = !recording;
+                windowButton.Enabled = !recording;
             };
             refresh.Start();
             if (openOnLaunch)
@@ -128,11 +133,11 @@ internal static class Program
 
         private void OpenRecorder() => Open("chrome.exe", host.RecorderUrl);
 
-        private async void BeginAreaCapture()
+        private async void BeginCapture(bool windowMode)
         {
-            if (areaToolbar is not null)
+            if (captureToolbar is not null)
             {
-                areaToolbar.Activate();
+                captureToolbar.Activate();
                 return;
             }
             if (selecting)
@@ -149,19 +154,21 @@ internal static class Program
             try
             {
                 selecting = true;
-                SelectedArea area;
+                CaptureTarget target;
+                AudioSelection audio;
                 try
                 {
-                    using var overlay = new AreaSelectionOverlay(Screen.FromPoint(Cursor.Position));
-                    NativeCaptureMethods.ExcludeWindow(overlay);
-                    if (overlay.ShowDialog() != DialogResult.OK || overlay.Selection.Region.IsEmpty)
+                    var selection = windowMode ? ChooseWindow() : ChooseArea();
+                    using var options = selection is null ? null : new AudioOptionsDialog();
+                    if (selection is null || options!.ShowDialog() != DialogResult.OK)
                     {
                         if (showWindowOnCancel)
                             window.Show();
                         return;
                     }
 
-                    area = overlay.Selection;
+                    target = selection.Value;
+                    audio = options.Selection;
                 }
                 finally
                 {
@@ -175,16 +182,23 @@ internal static class Program
                     return;
                 }
 
-                using var toolbar = new AreaRecordingToolbar(area, session);
-                areaToolbar = toolbar;
+                using var toolbar = new RecordingToolbar(target, session);
+                captureToolbar = toolbar;
                 var excluded = NativeCaptureMethods.ExcludeWindow(toolbar);
                 toolbar.Show();
-                if (!excluded && toolbar.Bounds.IntersectsWith(area.DesktopRegion))
+                if (!target.IsWindow && !excluded && toolbar.Bounds.IntersectsWith(target.Bounds))
                     toolbar.Hide(); // The tray Stop remains available for full-display selections.
 
-                var saved = await Task.Run(() => AreaRecorder.RecordAsync(area, host.Folder, session.StopRequested));
+                var warnings = new Progress<string>(message =>
+                {
+                    if (!toolbar.IsDisposed)
+                        toolbar.ShowAudioWarning(message);
+                    icon.ShowBalloonTip(4000, "Recording audio", message, ToolTipIcon.Warning);
+                });
+                var saved = await Task.Run(() => ScreenRecorder.RecordAsync(target, audio, host.Folder,
+                    session.StopRequested, warnings));
                 if (saved is not null)
-                    icon.ShowBalloonTip(4000, "Area recording saved", Path.GetFileName(saved), ToolTipIcon.Info);
+                    icon.ShowBalloonTip(4000, "Recording saved", Path.GetFileName(saved), ToolTipIcon.Info);
             }
             catch (Exception exception)
             {
@@ -192,8 +206,25 @@ internal static class Program
             }
             finally
             {
-                areaToolbar = null;
+                captureToolbar = null;
             }
+        }
+
+        private static CaptureTarget? ChooseArea()
+        {
+            using var overlay = new AreaSelectionOverlay(Screen.FromPoint(Cursor.Position));
+            NativeCaptureMethods.ExcludeWindow(overlay);
+            return overlay.ShowDialog() == DialogResult.OK && !overlay.Selection.Region.IsEmpty
+                ? CaptureTarget.FromArea(overlay.Selection)
+                : null;
+        }
+
+        private static CaptureTarget? ChooseWindow()
+        {
+            using var picker = new WindowSelectionDialog();
+            return picker.ShowDialog() == DialogResult.OK && picker.Selection is { } selected
+                ? new CaptureTarget(selected.Handle, selected.Bounds, null)
+                : null;
         }
 
         private static void Open(string target, string arguments = "")
