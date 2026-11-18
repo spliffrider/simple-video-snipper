@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string] $Version = '0.1.1',
+    [string] $Version = '0.2.1',
     [ValidatePattern('^SimpleVideoSnipper(?:\.SetupCheck[A-Za-z0-9._-]*)?$')]
     [string] $Profile = 'SimpleVideoSnipper',
     [string] $CompilerPath,
@@ -53,10 +53,11 @@ if ((Get-FileHash -LiteralPath $FFmpegArchive -Algorithm SHA256).Hash -ne $expec
 tar.exe -xf $FFmpegArchive -C $work
 if ($LASTEXITCODE -ne 0) { throw 'Could not extract the FFmpeg archive.' }
 $ffmpeg = Join-Path $work ([IO.Path]::GetFileNameWithoutExtension($asset))
-Copy-Item -LiteralPath (Join-Path $ffmpeg 'bin\ffmpeg.exe'), (Join-Path $ffmpeg 'LICENSE.txt') -Destination $media
+Copy-Item -LiteralPath (Join-Path $ffmpeg 'bin\ffmpeg.exe'), (Join-Path $ffmpeg 'bin\ffprobe.exe'),
+    (Join-Path $ffmpeg 'LICENSE.txt') -Destination $media
 Get-ChildItem -LiteralPath (Join-Path $ffmpeg 'bin') -Filter '*.dll' -File | Copy-Item -Destination $media
 @"
-This build includes the FFmpeg LGPL shared Windows x64 executable and libraries.
+This build includes the FFmpeg LGPL shared Windows x64 executables and libraries.
 The FFmpeg license is included in LICENSE.txt.
 
 Binary asset: $download

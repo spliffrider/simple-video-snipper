@@ -92,7 +92,7 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
         var list = new ListBox { Width = 400, Height = 180, AccessibleName = "Unsaved recordings" };
         list.Items.AddRange(clips);
         list.SelectedIndex = 0;
-        var save = new Button { Text = "Save As…", AutoSize = true, DialogResult = DialogResult.OK };
+        var open = new Button { Text = "Continue", AutoSize = true, DialogResult = DialogResult.OK };
         var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.Cancel };
         var discard = new Button { Text = "Discard", AutoSize = true };
         discard.Click += (_, _) =>
@@ -113,14 +113,14 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
                 picker.DialogResult = DialogResult.Cancel;
         };
         var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-        buttons.Controls.AddRange([save, discard, close]);
+        buttons.Controls.AddRange([open, discard, close]);
         var layout = new FlowLayoutPanel
         {
             AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12),
         };
         layout.Controls.AddRange([list, buttons]);
         picker.Controls.Add(layout);
-        picker.AcceptButton = save;
+        picker.AcceptButton = open;
         picker.CancelButton = close;
         if (picker.ShowDialog() == DialogResult.OK && list.SelectedItem is PendingClip chosen)
             Enqueue(chosen, ask: true);
@@ -185,6 +185,47 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
     private async Task SaveOneAsync(PendingClip clip, bool ask)
     {
         var settings = preferences;
+        ClipEdits? edits = null;
+        while (true)
+        {
+            var save = new TaskDialogButton("Save");
+            var edit = new TaskDialogButton("Edit");
+            var later = new TaskDialogButton("Keep for later");
+            var action = TaskDialog.ShowDialog(new TaskDialogPage
+            {
+                Caption = "Simple Video Snipper", Heading = "Recording ready", Text = clip.Title,
+                Buttons = { save, edit, later }, AllowCancel = true, DefaultButton = save,
+            });
+            if (action == save)
+                break;
+            if (action != edit)
+            {
+                NotifyKept();
+                return;
+            }
+
+            try
+            {
+                tray.Text = "Simple Video Snipper — Opening editor";
+                using var media = await ClipEditMedia.OpenAsync(clip);
+                using var editor = new ClipEditor(clip.Title, media);
+                var editResult = editor.ShowDialog();
+                await editor.StopPreviewAsync();
+                if (editResult != DialogResult.OK)
+                    continue;
+                edits = editor.Edits;
+                break;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                MessageBox.Show(exception.Message, "Could not open editor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                tray.Text = "Simple Video Snipper";
+            }
+        }
+
         ExportRequest? request = ask || settings.Mode == SaveMode.Ask
             ? ChooseFile(clip, settings)
             : ExportRequest.Quick(clip, settings);
@@ -196,7 +237,7 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
                 if (storage.IsInPendingFolder(destination.Path))
                     throw new IOException("Choose a save location outside the temporary recording files.");
                 tray.Text = "Simple Video Snipper — Saving recording";
-                result = await Task.Run(() => RecordingExporter.SaveAsync(clip, destination));
+                result = await Task.Run(() => RecordingExporter.SaveAsync(clip, destination with { Edits = edits }));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
@@ -214,7 +255,7 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
             notice.Show();
             return;
         }
-        Notify("Recording kept", "Open Unsaved recordings from the tray to save it later.");
+        NotifyKept();
     }
 
     private static ExportRequest? ChooseFile(PendingClip clip, SavePreferences settings, ExportRequest? previous = null)
@@ -285,6 +326,7 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
     }
 
     private void Notify(string title, string message) => tray.ShowBalloonTip(5000, title, message, ToolTipIcon.Info);
+    private void NotifyKept() => Notify("Recording kept", "Open Unsaved recordings from the tray to save it later.");
     public void Dispose() => notice?.Dispose();
 }
 

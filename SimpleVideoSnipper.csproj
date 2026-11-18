@@ -4,11 +4,13 @@
     <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19045.0</SupportedOSPlatformVersion>
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="System.IO" />
     <AssemblyMetadata Include="SnipperProfile" Value="$(SnipperProfile)" Condition="'$(SnipperProfile)' != ''" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="NAudio.Wasapi" Version="3.3.0" />
@@ -17,5 +19,7 @@
     <EmbeddedResource Include="Companion/*" />
     <None Include=".tools/ffmpeg.exe" Link="ffmpeg.exe" CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="Never" Condition="Exists('.tools/ffmpeg.exe')" />
+    <None Include=".tools/ffprobe.exe" Link="ffprobe.exe" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="Never" Condition="Exists('.tools/ffprobe.exe')" />
   </ItemGroup>
 </Project>

@@ -20,7 +20,7 @@ internal sealed class SaveSettingsDialog : Form
 
         mode.Items.AddRange(["Ask every time", "Quick Save"]);
         mode.SelectedIndex = preferences.Mode == SaveMode.QuickSave ? 1 : 0;
-        mode.AccessibleName = "After recording";
+        mode.AccessibleName = "When saving";
         format.Items.AddRange(["MP4", "WebM"]);
         format.SelectedIndex = preferences.Format == ExportFormat.WebM ? 1 : 0;
         format.AccessibleName = "Preferred video format";
@@ -46,7 +46,7 @@ internal sealed class SaveSettingsDialog : Form
         {
             AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, Padding = new Padding(14),
         };
-        layout.Controls.Add(new Label { Text = "After recording", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+        layout.Controls.Add(new Label { Text = "When saving", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
         layout.Controls.Add(mode, 1, 0);
         layout.Controls.Add(new Label { Text = "Preferred format", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
         layout.Controls.Add(format, 1, 1);
