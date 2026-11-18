@@ -124,7 +124,8 @@ internal static class ScreenRecorder
         await using (var stream = new FileStream(partial, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
         {
             using var output = stream.AsRandomAccessStream();
-            var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = true };
+            // Hardware transcoding can encode black frames from the Direct3D capture surfaces.
+            var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = false };
             var preparation = await transcoder.PrepareMediaStreamSourceTranscodeAsync(source, output, profile);
             if (!preparation.CanTranscode)
                 throw new InvalidOperationException($"Windows could not prepare the MP4 encoder ({preparation.FailureReason}).");
