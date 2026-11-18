@@ -7,7 +7,7 @@ import SwiftUI
 @MainActor
 final class SnipperModel: ObservableObject {
     enum Phase: Equatable {
-        case idle, selecting, starting, browser, recording, finishing, saving
+        case idle, selecting, starting, browser, recording, finishing, reviewing, editing, saving
 
         var label: String {
             switch self {
@@ -17,6 +17,8 @@ final class SnipperModel: ObservableObject {
             case .browser: "Choose a tab in Chrome"
             case .recording: "Recording"
             case .finishing: "Finishing…"
+            case .reviewing: "Recording ready"
+            case .editing: "Editing recording"
             case .saving: "Saving…"
             }
         }
@@ -35,6 +37,7 @@ final class SnipperModel: ObservableObject {
     private var settings: SnipperPanel?
     private var controls: SnipperPanel?
     private var savedNotice: SnipperPanel?
+    private var editor: ClipEditorModel?
     private var native: NativeRecorder?
     private var companion: CompanionServer?
     private var browserURL: URL?
@@ -181,6 +184,12 @@ final class SnipperModel: ObservableObject {
         }
     }
 
+    func cleanUpEditor() {
+        editor?.close()
+        editor?.media.removePreviewFiles()
+        editor = nil
+    }
+
     func quit() {
         guard phase == .idle || phase == .selecting || phase == .browser else { return }
         if phase == .browser {
@@ -229,10 +238,8 @@ final class SnipperModel: ObservableObject {
     func showPending() {
         guard phase == .idle else { return }
         let panel = SnipperPanel("Unsaved recordings", size: CGSize(width: 545, height: 320)) {
-            PendingClipsView(clips: storage.pending(), save: { [weak self] clip in
-                guard let self else { return }
-                closeInteraction()
-                save(clip, ask: true)
+            PendingClipsView(clips: storage.pending(), open: { [weak self] clip in
+                self?.review(clip)
             }, discard: { [weak self] clip in self?.confirmDiscard(clip, refresh: true) })
         }
         showInteraction(panel)
@@ -242,7 +249,7 @@ final class SnipperModel: ObservableObject {
         switch phase {
         case .idle: recordArea()
         case .recording, .finishing: controls?.orderFrontRegardless()
-        case .selecting: interaction?.present()
+        case .selecting, .reviewing, .editing: interaction?.present()
         case .browser:
             if let url = browserURL, let chrome = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") {
                 Task { try? await openChrome(url, application: chrome) }
@@ -336,14 +343,14 @@ final class SnipperModel: ObservableObject {
                     try await NativeAudioMix.combineTracks(in: draft.url)
                     let clip = try draft.publish()
                     resetCapture()
-                    save(clip, ask: false)
+                    review(clip)
                 } catch {
                     // A source failure may still leave a playable file. Make it available for saving.
                     if await playable(draft.url), let clip = try? draft.publish() {
                         let details = error.localizedDescription
                         resetCapture()
                         alert("The recording ended early", details + " The captured clip is available to save.")
-                        save(clip, ask: false)
+                        review(clip)
                     } else {
                         draft.removeIfEmpty()
                         resetCapture()
@@ -366,7 +373,7 @@ final class SnipperModel: ObservableObject {
                 resetCapture()
                 switch result {
                 case .success(let clip):
-                    save(clip, ask: false)
+                    review(clip)
                 case .failure(let error):
                     let kept = FileManager.default.fileExists(atPath: draft.url.path)
                     let details = kept ? "\(error.localizedDescription) Partial data is in \(draft.url.path)." : error.localizedDescription
@@ -479,14 +486,70 @@ final class SnipperModel: ObservableObject {
         interaction = nil
     }
 
-    private func save(_ clip: PendingClip, ask: Bool) {
+    private func review(_ clip: PendingClip) {
         guard phase == .idle else { return }
+        phase = .reviewing
+        let panel = SnipperPanel("Recording ready", size: CGSize(width: 490, height: 133)) {
+            RecordingReadyView(title: clip.title, save: { [weak self] in
+                self?.save(clip)
+            }, edit: { [weak self] in
+                self?.openEditor(clip)
+            }, later: { [weak self] in
+                self?.keepForLater()
+            })
+        }
+        panel.onClose = { [weak self] in self?.keepForLater() }
+        showInteraction(panel)
+    }
+
+    private func keepForLater() {
+        closeInteraction()
+        phase = .idle
+    }
+
+    private func openEditor(_ clip: PendingClip) {
+        guard phase == .reviewing else { return }
+        closeInteraction()
+        phase = .editing
+        Task {
+            do {
+                let media = try await ClipEditMedia.open(clip)
+                let editor = ClipEditorModel(media: media)
+                self.editor = editor
+                let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1000, height: 740)
+                let size = CGSize(width: min(900, screen.width - 40), height: min(660, screen.height - 70))
+                let panel = SnipperPanel("Edit Recording", size: size) {
+                    ClipEditorView(model: editor, save: { [weak self, weak editor] in
+                        guard let self, let editor else { return }
+                        save(clip, edits: editor.exportEdits)
+                    }, cancel: { [weak self] in self?.returnFromEditor(clip) })
+                }
+                panel.onClose = { [weak self] in self?.returnFromEditor(clip) }
+                showInteraction(panel)
+            } catch {
+                phase = .idle
+                alert("Could not open the editor", error.localizedDescription)
+                review(clip)
+            }
+        }
+    }
+
+    private func returnFromEditor(_ clip: PendingClip) {
+        cleanUpEditor()
+        closeInteraction()
+        phase = .idle
+        review(clip)
+    }
+
+    private func save(_ clip: PendingClip, edits: ClipEdits? = nil) {
+        guard phase == .reviewing || phase == .editing else { return }
+        cleanUpEditor()
+        closeInteraction()
         phase = .saving
         Task {
             defer { phase = .idle }
-            let requiresAsk = ask || !defaults.bool(forKey: "quickSave")
             var request: ExportRequest?
-            if requiresAsk {
+            if !defaults.bool(forKey: "quickSave") {
                 request = showSavePanel(for: clip, format: preferredFormat)
             } else {
                 request = ExportRequest(format: preferredFormat, destination: .quick(folder: exportFolder))
@@ -494,7 +557,7 @@ final class SnipperModel: ObservableObject {
             while let destination = request {
                 do {
                     try checkDestination(destination)
-                    let saved = try await RecordingExporter.save(clip, request: destination)
+                    let saved = try await RecordingExporter.save(clip, request: destination, edits: edits)
                     showSaved(saved)
                     return
                 } catch {
@@ -542,7 +605,7 @@ final class SnipperModel: ObservableObject {
         dialog.informativeText = "\(message) The temporary recording is still available."
         dialog.addButton(withTitle: "Retry")
         dialog.addButton(withTitle: "Save As…")
-        dialog.addButton(withTitle: "Keep Unsaved").keyEquivalent = "\u{1b}"
+        dialog.addButton(withTitle: "Keep for later").keyEquivalent = "\u{1b}"
         dialog.addButton(withTitle: "Discard…").hasDestructiveAction = true
         NSApp.activate(ignoringOtherApps: true)
         switch dialog.runModal() {

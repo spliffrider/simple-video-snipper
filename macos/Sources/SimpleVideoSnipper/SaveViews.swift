@@ -71,7 +71,7 @@ struct SnipperSettingsView: View {
 
 struct PendingClipsView: View {
     let clips: [PendingClip]
-    let save: (PendingClip) -> Void
+    let open: (PendingClip) -> Void
     let discard: (PendingClip) -> Void
 
     @State private var choice: URL?
@@ -96,8 +96,8 @@ struct PendingClipsView: View {
                 }
                 .disabled(selected == nil)
                 Spacer()
-                Button("Save As…") {
-                    if let selected { save(selected) }
+                Button("Continue") {
+                    if let selected { open(selected) }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(selected == nil)
@@ -177,5 +177,28 @@ final class SavePanelFormat {
                     + "." + format.rawValue
             }
         }
+    }
+}
+
+struct RecordingReadyView: View {
+    let title: String
+    let save: () -> Void
+    let edit: () -> Void
+    let later: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            HStack {
+                Button("Keep for later", action: later).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Edit", action: edit)
+                Button("Save", action: save).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
     }
 }

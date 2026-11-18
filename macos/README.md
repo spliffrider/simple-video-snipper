@@ -18,9 +18,17 @@ On first launch, confirm the temporary recordings folder. Allow Simple Video Sni
 - **Record Area** opens a selection on the display under the pointer. Drag the bottom-right handle to adjust the selection, then choose **Continue**.
 - **Record Window** lists on-screen app windows. The saved video keeps its initial frame size when the source resizes. A window that is no longer on screen ends the recording.
 - **Record Chrome Tab** opens the bundled recorder in Google Chrome. Use Chrome’s picker to select the source and start from the recorder tab. Stop from the browser or menu bar.
-- **Settings** controls the save mode, format, export folder, and optional copying to the Finder clipboard. Canceled and failed exports remain in **Unsaved Recordings**.
+- **Settings** controls the save mode, format, export folder, and optional copying to the Finder clipboard.
 
-Native H.264 MP4 works with the macOS frameworks. Install FFmpeg for WebM exports and for either export format from Chrome. The app checks Homebrew’s Apple silicon and Intel locations. The Chrome companion stages the browser’s VP8/Opus stream and the exporter converts it to the selected format.
+## Edit and save
+
+After Stop, choose **Save**, **Edit**, or **Keep for later**. **Save** uses your Ask every time or Quick Save settings. **Keep for later** leaves the original recording in **Unsaved Recordings**.
+
+Scrub in **Edit**, then choose **Set start** and **Set end**. Drag on the frame to set a crop. **Add music…** starts a local audio file at the start of the edited clip. Shorter music leaves silence after it ends while the video continues. **Mute original audio** lets you use only the music or export a silent clip.
+
+**Play preview** prepares a local preview with the current edits. Pause, seek, restart, or change the preview volume. **Back to edits** restores the editor with your trim, crop, and audio choices. **Save** uses those choices and your preferred export settings. If a save fails, **Retry** and **Save As…** reuse the edits, and **Keep for later** keeps the original recording.
+
+Editing uses FFmpeg and FFprobe. WebM exports and Chrome tab exports use FFmpeg. The app checks Homebrew’s Apple silicon and Intel locations. An unedited native MP4 can be saved directly.
 
 ```sh
 brew install ffmpeg

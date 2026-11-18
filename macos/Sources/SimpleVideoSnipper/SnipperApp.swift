@@ -79,6 +79,10 @@ final class SnipperDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        model.cleanUpEditor()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         model.isCapturing || model.phase == .saving ? .terminateCancel : .terminateNow
     }

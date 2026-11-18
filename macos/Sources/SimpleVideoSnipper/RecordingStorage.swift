@@ -156,11 +156,13 @@ struct ExportRequest: Sendable {
 }
 
 enum RecordingExporter {
-    static func save(_ clip: PendingClip, request: ExportRequest) async throws -> URL {
-        try await Task.detached(priority: .userInitiated) { try export(clip, request: request) }.value
+    static func save(_ clip: PendingClip, request: ExportRequest, edits: ClipEdits? = nil) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            try await export(clip, request: request, edits: edits)
+        }.value
     }
 
-    private static func export(_ clip: PendingClip, request: ExportRequest) throws -> URL {
+    private static func export(_ clip: PendingClip, request: ExportRequest, edits: ClipEdits?) async throws -> URL {
         let files = FileManager.default
         let folder: URL
         switch request.destination {
@@ -168,15 +170,21 @@ enum RecordingExporter {
             folder = target
             try files.createDirectory(at: folder, withIntermediateDirectories: true)
         case .chosen(let file, _):
+            if let music = edits?.music, sameFile(music.url, file) {
+                throw SnipperError.problem("Choose a different filename so the original music file stays intact.")
+            }
             folder = file.deletingLastPathComponent()
         }
 
         let temporary = folder.appendingPathComponent(".snipper-export-\(UUID().uuidString).\(request.format.rawValue)")
         defer { try? files.removeItem(at: temporary) }
-        if clip.format == .mp4, request.format == .mp4 {
+        if edits == nil, clip.format == .mp4, request.format == .mp4 {
             try files.copyItem(at: clip.url, to: temporary)
         } else {
-            try transcode(clip.url, to: temporary, format: request.format)
+            try await ClipRenderer.render(clip.url, to: temporary, format: request.format, edits: edits)
+        }
+        guard try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 > 0 else {
+            throw SnipperError.problem("The export produced an empty file.")
         }
 
         let saved: URL
@@ -241,41 +249,14 @@ enum RecordingExporter {
         return error
     }
 
-    static var ffmpegURL: URL? {
-        let candidates = [
-            Bundle.main.url(forAuxiliaryExecutable: "ffmpeg"),
-            URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg"),
-            URL(fileURLWithPath: "/usr/local/bin/ffmpeg"),
-        ].compactMap { $0 }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
-    private static func transcode(_ source: URL, to destination: URL, format: ClipFormat) throws {
-        guard let ffmpegURL else {
-            throw SnipperError.problem("Install FFmpeg and retry the export. It is required for WebM and Chrome tab exports.")
+    private static func sameFile(_ first: URL, _ second: URL) -> Bool {
+        if first.resolvingSymlinksInPath().standardizedFileURL == second.resolvingSymlinksInPath().standardizedFileURL {
+            return true
         }
-        var arguments = ["-nostdin", "-v", "error", "-n", "-i", source.path, "-map", "0:v:0", "-map", "0:a:0?"]
-        switch format {
-        case .mp4:
-            arguments += ["-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-                          "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:a", "aac", "-movflags", "+faststart"]
-        case .webm:
-            arguments += ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-crf", "31", "-b:v", "0",
-                          "-cpu-used", "4", "-c:a", "libopus"]
+        guard let left = try? first.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier,
+              let right = try? second.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier else {
+            return false
         }
-        arguments.append(destination.path)
-        let task = Process()
-        let errors = Pipe()
-        task.executableURL = ffmpegURL
-        task.arguments = arguments
-        task.standardError = errors
-        task.standardOutput = FileHandle.nullDevice
-        try task.run()
-        let output = errors.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        guard task.terminationStatus == 0 else {
-            let message = String(decoding: output.suffix(1500), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw SnipperError.problem(message.isEmpty ? "FFmpeg could not export this recording." : message)
-        }
+        return left.isEqual(right)
     }
 }
