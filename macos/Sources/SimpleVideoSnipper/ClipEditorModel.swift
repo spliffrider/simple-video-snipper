@@ -43,6 +43,18 @@ final class ClipEditorModel: ObservableObject {
     func setStart() { if canSetStart { edits.start = position } }
     func setEnd() { if canSetEnd { edits.end = position } }
 
+    func moveTrimStart(to time: Double) {
+        let start = min(max(0, time), max(0, edits.end - minimumLength))
+        if start != edits.start { edits.start = start }
+        position = start
+    }
+
+    func moveTrimEnd(to time: Double) {
+        let end = max(min(media.info.duration, time), min(media.info.duration, edits.start + minimumLength))
+        if end != edits.end { edits.end = end }
+        position = end
+    }
+
     func resetTrim() {
         edits.start = 0
         edits.end = media.info.duration

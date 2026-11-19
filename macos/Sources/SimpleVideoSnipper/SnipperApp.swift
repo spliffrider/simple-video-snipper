@@ -7,7 +7,7 @@ struct SnipperApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            SnipperMenu(model: delegate.model)
+            SnipperMenu(model: delegate.model, snipShortcut: delegate.model.snipShortcut)
         } label: {
             MenuBarIcon(model: delegate.model)
         }
@@ -26,6 +26,7 @@ private struct MenuBarIcon: View {
 
 private struct SnipperMenu: View {
     @ObservedObject var model: SnipperModel
+    @ObservedObject var snipShortcut: GlobalSnipShortcut
 
     var body: some View {
         if model.phase != .idle {
@@ -33,7 +34,10 @@ private struct SnipperMenu: View {
             if let notice = model.captureNotice { Text(notice) }
             Divider()
         }
-        Button("Record Area…") { model.recordArea() }.disabled(!model.canStart)
+        Button(snipShortcut.current.map { "Record Area…    \($0)" } ?? "Record Area…") {
+            model.recordArea()
+        }
+        .disabled(!model.canStart)
         Button("Record Window…") { model.recordWindow() }.disabled(!model.canStart)
         Button("Record Chrome Tab…") { model.recordChromeTab() }.disabled(!model.canStart)
         Button(model.phase == .browser ? "Cancel Chrome Recorder" : "Stop Recording") { model.stop() }

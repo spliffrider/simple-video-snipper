@@ -1,6 +1,6 @@
 # Simple Video Snipper for macOS
 
-Simple Video Snipper is a menu bar recorder for macOS 15 and later. It records a selected area, app window, or Chrome tab. Use **⌃⌥⇧R** to select an area and **Stop Recording** in the floating controls or menu bar to finish. The shortcut is configurable in Settings.
+Simple Video Snipper is a menu bar recorder for macOS 15 and later. It records a selected area, app window, or Chrome tab. Use **Control–Option–Shift–R** to select an area and **Stop Recording** in the floating controls or menu bar to finish.
 
 ## Build and run
 
@@ -20,11 +20,13 @@ On first launch, confirm the temporary recordings folder. Allow Simple Video Sni
 - **Record Chrome Tab** opens the bundled recorder in Google Chrome. Use Chrome’s picker to select the source and start from the recorder tab. Stop from the browser or menu bar.
 - **Settings** controls the save mode, format, export folder, and optional copying to the Finder clipboard.
 
+Under **Settings → Snip Shortcut**, choose Mac modifiers and a key, then click **Save Shortcut**. **Use Default** selects **Control–Option–Shift–R**. The **Record Area** menu item shows the configured shortcut. If macOS rejects a change or the preference cannot be written, the active shortcut stays registered.
+
 ## Edit and save
 
 After Stop, choose **Save**, **Edit**, or **Keep for later**. **Save** uses your Ask every time or Quick Save settings. **Keep for later** leaves the original recording in **Unsaved Recordings**.
 
-Scrub in **Edit**, then choose **Set start** and **Set end**. Drag on the frame to set a crop. **Add music…** starts a local audio file at the start of the edited clip. Shorter music leaves silence after it ends while the video continues. **Mute original audio** lets you use only the music or export a silent clip.
+In **Edit**, drag the timeline handles to trim and click the track to scrub. The highlighted region is the part that plays and exports. Use **Set start** or **Set end** to trim at the playhead, or **Reset trim** to restore the full clip. Drag on the frame to set a crop. **Add music…** starts a local audio file at the start of the edited clip. Shorter music leaves silence after it ends while the video continues. **Mute original audio** lets you use only the music or export a silent clip.
 
 **Play preview** prepares a local preview with the current edits. Pause, seek, restart, or change the preview volume. **Back to edits** restores the editor with your trim, crop, and audio choices. **Save** uses those choices and your preferred export settings. If a save fails, **Retry** and **Save As…** reuse the edits, and **Keep for later** keeps the original recording.
 

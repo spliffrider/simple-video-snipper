@@ -1,10 +1,5 @@
 import AppKit
-import KeyboardShortcuts
 import SwiftUI
-
-extension KeyboardShortcuts.Name {
-    static let recordArea = Self("recordArea", default: .init(.r, modifiers: [.control, .option, .shift]))
-}
 
 struct StorageSetupView: View {
     let choose: () -> Void
@@ -60,8 +55,8 @@ struct SnipperSettingsView: View {
                 }
                 Toggle("Copy the saved file to the clipboard", isOn: $autoCopy)
             }
-            Section("Shortcut") {
-                ShortcutSetting()
+            Section("Snip Shortcut") {
+                ShortcutSetting(shortcut: model.snipShortcut)
             }
         }
         .formStyle(.grouped)

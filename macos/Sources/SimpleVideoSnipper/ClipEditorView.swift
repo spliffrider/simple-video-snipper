@@ -47,16 +47,20 @@ struct ClipEditorView: View {
                 .task(id: model.position) { await model.readFrame(at: model.position) }
             HStack {
                 Text(timestamp(model.position)).monospacedDigit()
-                Slider(value: $model.position, in: 0...model.media.info.duration) { Text("Scrub recording") }
-                    .labelsHidden().accessibilityLabel("Scrub recording")
+                TrimTimeline(model: model)
                 Text(timestamp(model.media.info.duration)).monospacedDigit()
             }
             HStack {
-                Button("Set start") { model.setStart() }.disabled(!model.canSetStart)
-                Button("Set end") { model.setEnd() }.disabled(!model.canSetEnd)
+                Button("Set start") { model.setStart() }
+                    .keyboardShortcut(.leftArrow, modifiers: .option)
+                    .disabled(!model.canSetStart)
+                Button("Set end") { model.setEnd() }
+                    .keyboardShortcut(.rightArrow, modifiers: .option)
+                    .disabled(!model.canSetEnd)
                 Text("\(timestamp(model.edits.start)) – \(timestamp(model.edits.end))")
                     .monospacedDigit().foregroundStyle(.secondary)
                     .accessibilityLabel("Trim range")
+                    .accessibilityValue("\(timestamp(model.edits.start)) to \(timestamp(model.edits.end))")
                 if model.edits.start > 0 || model.edits.end < model.media.info.duration {
                     Button("Reset trim") { model.resetTrim() }
                 }

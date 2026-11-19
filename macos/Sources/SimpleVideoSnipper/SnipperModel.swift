@@ -1,6 +1,5 @@
 import AppKit
 import AVFoundation
-import KeyboardShortcuts
 import ScreenCaptureKit
 import SwiftUI
 
@@ -29,6 +28,8 @@ final class SnipperModel: ObservableObject {
     @Published private(set) var stagingPath = ""
     @Published private(set) var exportPath = ""
     @Published private(set) var captureNotice: String?
+
+    let snipShortcut = GlobalSnipShortcut()
 
     private let storage = RecordingStorage()
     private let defaults = UserDefaults.standard
@@ -60,9 +61,7 @@ final class SnipperModel: ObservableObject {
 
     func launch() {
         updateStoragePaths()
-        KeyboardShortcuts.onKeyUp(for: .recordArea) { [weak self] in
-            Task { @MainActor in self?.shortcut() }
-        }
+        snipShortcut.start { [weak self] in self?.handleShortcut() }
         if storage.root == nil { showSetup() }
     }
 
@@ -210,7 +209,7 @@ final class SnipperModel: ObservableObject {
             settings.present()
             return
         }
-        let panel = SnipperPanel("Simple Video Snipper Settings", size: CGSize(width: 555, height: 430)) {
+        let panel = SnipperPanel("Simple Video Snipper Settings", size: CGSize(width: 580, height: 545)) {
             SnipperSettingsView(model: self)
         }
         panel.onClose = { [weak self] in self?.settings = nil }
@@ -245,7 +244,7 @@ final class SnipperModel: ObservableObject {
         showInteraction(panel)
     }
 
-    private func shortcut() {
+    private func handleShortcut() {
         switch phase {
         case .idle: recordArea()
         case .recording, .finishing: controls?.orderFrontRegardless()
