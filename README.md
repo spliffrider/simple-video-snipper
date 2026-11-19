@@ -23,6 +23,8 @@ Run `dotnet run -c Release` with the .NET 10 SDK.
 3. Use the floating **Stop recording** button or the tray menu. The shortcut brings the recording controls forward. If the selected window resizes, the video keeps its original dimensions and fits the new window inside the frame.
 4. Finish in the desktop save flow. Recordings with audio contain one mix.
 
+Change the global area shortcut under **Settings → Snip shortcut**. Choose modifiers and a key, then save. **Use default** selects **Ctrl+Alt+R**. If Windows rejects a combination, the current shortcut stays active. [Hotkey registration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)
+
 ## Try the Chrome recording prototype
 
 Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
@@ -34,9 +36,9 @@ Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
 
 ## Save and share recordings
 
-After Stop, choose **Save**, **Edit**, or **Keep for later**. In **Edit**, scrub the preview, use **Set start** and **Set end** to trim, or drag on the preview to crop. **Add music** mixes a local audio file from the start of the edited clip. Adjust its volume or choose **Mute original audio** for music alone. **Play preview** plays the edited clip with its soundtrack. Use **Pause**, **Restart**, the seek bar, or the preview volume while reviewing, then choose **Back to edits** or **Save**.
+After Stop, choose **Save**, **Edit**, or **Keep for later**. In **Edit**, drag the two timeline handles to trim. Click the track to scrub, or use **Set start** and **Set end** to trim at the playhead. Drag on the preview to crop. **Add music** mixes a local audio file from the start of the edited clip. Adjust its volume or choose **Mute original audio** for music alone. **Play preview** plays the edited clip with its soundtrack. Use **Pause**, **Restart**, the seek bar, or the preview volume while reviewing, then choose **Back to edits** or **Save**.
 
-Open **Settings** in the app or **Save settings** in the tray to set the preferred folder, format, and clipboard behavior. **Ask every time** opens the Windows Save As dialog when you choose to save. **Quick Save** uses your preferences and adds a numeric suffix if the filename is taken. The defaults are Ask every time, MP4, `Videos\Simple Video Snipper`, and auto-copy off.
+Open **Settings** in the app or tray to set the preferred folder, format, and clipboard behavior. **Ask every time** opens the Windows Save As dialog when you choose to save. **Quick Save** uses your preferences and adds a numeric suffix if the filename is taken. The defaults are Ask every time, MP4, `Videos\Simple Video Snipper`, and auto-copy off.
 
 Both native and Chrome recordings can be exported as MP4 or WebM. The installer bundles FFmpeg and FFprobe. It uses Windows Media Foundation for H.264. When running from source, put an [FFmpeg build](https://ffmpeg.org/download.html) with `libx264`, `libvpx-vp9`, `libopus`, and AAC on PATH or in `.tools/ffmpeg.exe` before building. Editing also needs `ffprobe.exe` on PATH or in `.tools`. A same-format save without edits preserves the existing encoding. WebM is remuxed when FFmpeg is available so playback can seek by time.
 
@@ -44,7 +46,7 @@ If saving fails, choose **Retry**, **Save As**, or **Keep for later**. To resume
 
 ## Capture flow and defaults
 
-1. Open the capture toolbar from the tray or with `Ctrl+Alt+R`. Let users rebind the shortcut, including Windows-key combinations that register successfully. Keep the previous binding if a new one conflicts. `Win+Shift+R` already opens Windows Snipping Tool. [Hotkey registration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey) · [Snipping Tool shortcuts](https://support.microsoft.com/en-us/windows/apps/use-snipping-tool-to-capture-screenshots)
+1. Open the capture toolbar from the tray or with `Ctrl+Alt+R`. The shortcut supports Windows-key combinations that register successfully and keeps the previous binding if a new one conflicts. `Win+Shift+R` already opens Windows Snipping Tool. [Hotkey registration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey) · [Snipping Tool shortcuts](https://support.microsoft.com/en-us/windows/apps/use-snipping-tool-to-capture-screenshots)
 2. Start in **Area** mode. Drag an adjustable rectangle within one monitor, select an open application in **Window**, or confirm a source in Chrome’s picker for **Browser tab**. Show the selected source and a **Record** button. Esc cancels selection. A browser-window capture follows the app window, including its controls and whichever tab is visible. A tab capture stays with the selected page as the user switches tabs.
 3. Offer **Microphone** and **System audio** for area and window, and **Microphone** and **Tab audio** for Chrome. Audio defaults to off. Show a microphone selector and level meter when enabled. If the mic disconnects, continue with the remaining streams and report the loss. System audio includes other sounds on the selected Windows output device. [WASAPI loopback](https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording)
 4. Show a recording indicator, elapsed time, and **Stop**, with a second Stop action in the tray. Pressing the shortcut during capture brings the controls forward. Keep snipper controls out of the recording. If the source closes, end the session and offer to save the captured clip. Show **Finishing** while writing the file. [Windows capture exclusion](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity)

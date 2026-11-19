@@ -19,6 +19,7 @@ internal sealed record SavePreferences
     public bool AutoCopy { get; init; }
     public string? TemporaryFolder { get; init; }
     public string[] PreviousTemporaryFolders { get; init; } = [];
+    public CaptureShortcut SnipShortcut { get; init; } = CaptureShortcut.Default;
 
     private static string VideosFolder()
     {
@@ -46,7 +47,12 @@ internal sealed class PreferencesStore(string file)
                 return new SavePreferences();
             if (JsonSerializer.Deserialize<SavePreferences>(File.ReadAllText(file), Options)
                 is { Folder: { } folder } value && Path.IsPathFullyQualified(folder))
-                return value;
+            {
+                if (value.SnipShortcut.IsValid)
+                    return value;
+                warning = $"The saved snip shortcut was invalid. Using {CaptureShortcut.Default}.";
+                return value with { SnipShortcut = CaptureShortcut.Default };
+            }
             warning = "Saving preferences contain an invalid folder. Using the defaults.";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)

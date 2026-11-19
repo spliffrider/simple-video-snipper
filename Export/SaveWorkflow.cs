@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 namespace SimpleVideoSnipper;
 
 internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore store,
-    SavePreferences initialPreferences, NotifyIcon tray) : IDisposable
+    SavePreferences initialPreferences, NotifyIcon tray, GlobalCaptureShortcut shortcut) : IDisposable
 {
     private readonly Queue<(PendingClip Clip, bool Ask)> queue = new();
     private readonly HashSet<string> queuedPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -42,7 +42,11 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
                     var next = storage.WithFolder(dialog.Preferences);
                     if (storage.IsInPendingFolder(next.Folder, next))
                         throw new IOException("Choose a save folder outside the temporary recording files.");
-                    store.Save(next);
+                    if (!shortcut.TryApply(next.SnipShortcut, () => store.Save(next)))
+                    {
+                        dialog.ShowShortcutError($"{next.SnipShortcut} is unavailable. Choose another shortcut.");
+                        continue;
+                    }
                     storage.Apply(next);
                     preferences = next;
                     break;

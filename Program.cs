@@ -69,12 +69,13 @@ internal static class Program
                 ContextMenuStrip = menu,
                 Visible = true,
             };
-            saves = new SaveWorkflow(storage, store, preferences, icon);
+            shortcut = new GlobalCaptureShortcut(preferences.SnipShortcut, () => BeginCapture(windowMode: false));
+            saves = new SaveWorkflow(storage, store, preferences, icon, shortcut);
             var selectArea = menu.Items.Add("Record area", null, (_, _) => BeginCapture(windowMode: false));
             var selectWindow = menu.Items.Add("Record window", null, (_, _) => BeginCapture(windowMode: true));
             menu.Items.Add("Open Chrome recorder", null, (_, _) => OpenRecorder());
             var stop = menu.Items.Add("Stop recording", null, (_, _) => host.RequestStop());
-            var settings = menu.Items.Add("Save settings…", null, (_, _) => saves.ShowSettings());
+            var settings = menu.Items.Add("Settings…", null, (_, _) => saves.ShowSettings());
             var pending = menu.Items.Add("Unsaved recordings…", null, (_, _) => saves.ShowPending());
             menu.Items.Add("Open save folder", null, (_, _) => saves.OpenSaveFolder());
             menu.Items.Add(new ToolStripSeparator());
@@ -103,17 +104,15 @@ internal static class Program
                 Dock = DockStyle.Fill,
                 Padding = new Padding(12),
             };
-            shortcut = new GlobalCaptureShortcut(() => BeginCapture(windowMode: false));
             var shortcutLabel = new Label
             {
-                Text = shortcut.IsRegistered ? "Area shortcut: Ctrl+Alt+R" : "Ctrl+Alt+R is unavailable. Use Record area.",
                 AutoSize = true,
                 Margin = new Padding(3, 8, 3, 3),
             };
             actions.Controls.AddRange([areaButton, windowButton, openButton, stopButton, settingsButton, shortcutLabel]);
             actions.SetFlowBreak(settingsButton, true);
-            if (shortcut.IsRegistered)
-                selectArea.Text = "Record area (Ctrl+Alt+R)";
+            shortcut.Changed += UpdateShortcutLabels;
+            UpdateShortcutLabels();
 
             window = new Form
             {
@@ -160,6 +159,13 @@ internal static class Program
             if (openOnLaunch)
                 window.Shown += (_, _) => OpenRecorder();
             window.Show();
+
+            void UpdateShortcutLabels()
+            {
+                var binding = shortcut.Binding;
+                selectArea.Text = shortcut.IsRegistered ? $"Record area ({binding})" : "Record area";
+                shortcutLabel.Text = shortcut.IsRegistered ? $"Area shortcut: {binding}" : $"{binding} is unavailable. Use Record area.";
+            }
         }
 
         private void OnRecordingReady(PendingClip clip)

@@ -4,10 +4,7 @@ internal sealed class ClipEditor : Form
 {
     private readonly ClipEditMedia media;
     private readonly CropPreview preview;
-    private readonly TrackBar timeline = new()
-    {
-        Dock = DockStyle.Fill, AutoSize = false, Height = 35, TickStyle = TickStyle.None, AccessibleName = "Scrub video",
-    };
+    private readonly TrimTimeline timeline;
     private readonly Label position = new() { AutoSize = true, Margin = new Padding(0, 0, 0, 2) };
     private readonly Label range = new() { AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
     private readonly Label previewStatus = new() { AutoSize = true, Text = "Loading preview…" };
@@ -31,8 +28,6 @@ internal sealed class ClipEditor : Form
     private ClipPlayback? playback;
     private bool stopping;
     private bool reviewing;
-    private int start;
-    private int end;
     private string? musicPath;
 
     public ClipEditor(string clipTitle, ClipEditMedia media)
@@ -47,10 +42,7 @@ internal sealed class ClipEditor : Form
         Padding = new Padding(16);
 
         preview = new CropPreview(media.VideoSize) { Dock = DockStyle.Fill, AccessibleName = "Video crop preview" };
-        timeline.Maximum = (int)Math.Clamp(Math.Ceiling(media.Duration.TotalMilliseconds), 1, 1_000_000);
-        timeline.SmallChange = Math.Max(1, timeline.Maximum / 300);
-        timeline.LargeChange = Math.Max(1, timeline.Maximum / 30);
-        end = timeline.Maximum;
+        timeline = new TrimTimeline(media.Duration);
         mute.Visible = media.HasAudio;
 
         var back = new Button { Text = "Back", AutoSize = true, DialogResult = DialogResult.Cancel };
@@ -59,7 +51,7 @@ internal sealed class ClipEditor : Form
 
         var description = new Label
         {
-            Text = "Drag on the preview to crop. Scrub to a frame to set the start or end.",
+            Text = "Drag the timeline handles to trim. Click the track to scrub. Drag on the preview to crop.",
             AutoSize = true, Margin = new Padding(0, 0, 0, 10),
         };
         var timelineRow = new TableLayoutPanel
@@ -114,15 +106,15 @@ internal sealed class ClipEditor : Form
         layout.Controls.Add(footer, 0, 6);
         Controls.Add(layout);
 
-        setStart.Click += (_, _) => { start = timeline.Value; UpdateLabels(); };
-        setEnd.Click += (_, _) => { end = timeline.Value; UpdateLabels(); };
-        resetTrim.Click += (_, _) => { start = 0; end = timeline.Maximum; UpdateLabels(); };
+        setStart.Click += (_, _) => timeline.SetStartAtPlayhead();
+        setEnd.Click += (_, _) => timeline.SetEndAtPlayhead();
+        resetTrim.Click += (_, _) => timeline.ResetTrim();
         resetCrop.Click += (_, _) => preview.ResetCrop();
         addMusic.Click += (_, _) => ChooseMusic();
         removeMusic.Click += (_, _) => SetMusic(null);
         playPreview.Click += (_, _) => BeginPlayback();
         preview.CropChanged += (_, _) => UpdateLabels();
-        timeline.ValueChanged += (_, _) =>
+        timeline.Changed += (_, _) =>
         {
             UpdateLabels();
             previewStatus.Text = "Seeking…";
@@ -136,8 +128,9 @@ internal sealed class ClipEditor : Form
         UpdateLabels();
     }
 
-    public ClipEdits? Edits => start == 0 && end == timeline.Maximum && preview.Crop is null && !mute.Checked && musicPath is null
-        ? null : new ClipEdits(TimeAt(start), end == timeline.Maximum ? null : TimeAt(end), preview.Crop, media.VideoSize, mute.Checked)
+    public ClipEdits? Edits => !timeline.IsTrimmed && preview.Crop is null && !mute.Checked && musicPath is null
+        ? null : new ClipEdits(TimeAt(timeline.Start), timeline.End == timeline.Maximum ? null : TimeAt(timeline.End),
+            preview.Crop, media.VideoSize, mute.Checked)
         {
             HasOriginalAudio = media.HasAudio,
             Music = musicPath is null ? null : new MusicTrack(musicPath, (int)volume.Value),
@@ -171,13 +164,12 @@ internal sealed class ClipEditor : Form
     {
         var current = TimeAt(timeline.Value);
         position.Text = $"{Clock(current)} / {Clock(media.Duration)}";
-        var trimStart = TimeAt(start);
-        var trimEnd = TimeAt(end);
+        var trimStart = TimeAt(timeline.Start);
+        var trimEnd = TimeAt(timeline.End);
         var selectedLength = trimEnd - trimStart;
-        var minimum = TimeSpan.FromMilliseconds(Math.Min(100, media.Duration.TotalMilliseconds));
-        setStart.Enabled = trimEnd - current >= minimum;
-        setEnd.Enabled = current - trimStart >= minimum;
-        resetTrim.Enabled = start != 0 || end != timeline.Maximum;
+        setStart.Enabled = timeline.CanSetStart;
+        setEnd.Enabled = timeline.CanSetEnd;
+        resetTrim.Enabled = timeline.IsTrimmed;
         resetCrop.Enabled = preview.Crop is not null;
         var crop = preview.Crop is { } selection ? $"   •   Crop {selection.Width} × {selection.Height}" : "";
         range.Text = $"Keep {Clock(trimStart)} to {Clock(trimEnd)} ({Clock(selectedLength)}){crop}";
