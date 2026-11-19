@@ -48,7 +48,16 @@ internal sealed class TrimTimeline : Control
 
     public void ResetTrim() => UpdateRange(0, Maximum, Value);
 
-    private void Scrub(int position) => UpdateRange(Start, End, Math.Clamp(position, 0, Maximum));
+    public void ShowPlaybackPosition(int position)
+    {
+        var next = Math.Clamp(position, 0, Maximum);
+        if (next == Value)
+            return;
+        Value = next;
+        Invalidate();
+    }
+
+    public void Scrub(int position) => UpdateRange(Start, End, Math.Clamp(position, 0, Maximum));
 
     private int Inset => LogicalToDeviceUnits(16);
     private int TrackWidth => Math.Max(1, ClientSize.Width - Inset * 2);

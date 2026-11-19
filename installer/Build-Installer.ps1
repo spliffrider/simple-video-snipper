@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string] $Version = '0.2.2',
+    [string] $Version = '0.2.3',
     [ValidatePattern('^SimpleVideoSnipper(?:\.SetupCheck[A-Za-z0-9._-]*)?$')]
     [string] $Profile = 'SimpleVideoSnipper',
     [string] $CompilerPath,

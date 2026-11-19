@@ -36,7 +36,7 @@ Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
 
 ## Save and share recordings
 
-After Stop, choose **Save**, **Edit**, or **Keep for later**. In **Edit**, drag the two timeline handles to trim. Click the track to scrub, or use **Set start** and **Set end** to trim at the playhead. Drag on the preview to crop. **Add music** mixes a local audio file from the start of the edited clip. Adjust its volume or choose **Mute original audio** for music alone. **Play preview** plays the edited clip with its soundtrack. Use **Pause**, **Restart**, the seek bar, or the preview volume while reviewing, then choose **Back to edits** or **Save**.
+After Stop, choose **Save**, **Edit**, or **Keep for later**. In **Edit**, drag the two timeline handles to trim. Click the track to scrub, or use **Set start** and **Set end** to trim at the playhead. Pause and drag on the preview to crop. **Add music** mixes a local audio file from the start of the edited clip. Adjust its volume or choose **Mute original audio** for music alone. Press **Space** or click **Play** to play or pause the edited clip in the editor. **Back 5s** and **Forward 5s** move the playhead within the kept range. Use **Save** to export the edits.
 
 Open **Settings** in the app or tray to set the preferred folder, format, and clipboard behavior. **Ask every time** opens the Windows Save As dialog when you choose to save. **Quick Save** uses your preferences and adds a numeric suffix if the filename is taken. The defaults are Ask every time, MP4, `Videos\Simple Video Snipper`, and auto-copy off.
 
