@@ -26,9 +26,9 @@ Under **Settings → Snip Shortcut**, choose Mac modifiers and a key, then click
 
 After Stop, choose **Save**, **Edit**, or **Keep for later**. **Save** uses your Ask every time or Quick Save settings. **Keep for later** leaves the original recording in **Unsaved Recordings**.
 
-In **Edit**, drag the timeline handles to trim and click the track to scrub. The highlighted region is the part that plays and exports. Use **Set start** or **Set end** to trim at the playhead, or **Reset trim** to restore the full clip. Drag on the frame to set a crop. **Add music…** starts a local audio file at the start of the edited clip. Shorter music leaves silence after it ends while the video continues. **Mute original audio** lets you use only the music or export a silent clip.
+In **Edit**, drag the timeline handles to trim and click the track to scrub. The highlighted region is the part that plays and exports. Use **Set start** or **Set end** to trim at the playhead, or **Reset trim** to restore the full clip. Pause and drag on the frame to set a crop. **Add music…** starts a local audio file at the start of the edited clip. Shorter music leaves silence after it ends while the video continues. **Mute original audio** lets you use only the music or export a silent clip.
 
-**Play preview** prepares a local preview with the current edits. Pause, seek, restart, or change the preview volume. **Back to edits** restores the editor with your trim, crop, and audio choices. **Save** uses those choices and your preferred export settings. If a save fails, **Retry** and **Save As…** reuse the edits, and **Keep for later** keeps the original recording.
+Press **Space** or click **Play** to play or pause the current edits in the editor. Click the timeline to seek and use **Back 5s** or **Forward 5s** to skip within the kept range. Moving a trim handle pauses playback at that handle. Preview volume only affects playback in the editor. **Save** uses your current edits and preferred export settings. If a save fails, **Retry** and **Save As…** reuse the edits, and **Keep for later** keeps the original recording.
 
 Editing uses FFmpeg and FFprobe. WebM exports and Chrome tab exports use FFmpeg. The app checks Homebrew’s Apple silicon and Intel locations. An unedited native MP4 can be saved directly.
 

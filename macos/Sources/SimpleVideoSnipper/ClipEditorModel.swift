@@ -7,23 +7,24 @@ import UniformTypeIdentifiers
 final class ClipEditorModel: ObservableObject {
     let media: ClipEditMedia
     @Published private(set) var edits: ClipEdits
-    @Published var position: Double = 0
+    // The editor playhead is always in source time, including while a trimmed preview plays.
+    @Published private(set) var position: Double = 0
     @Published private(set) var frame: NSImage?
     @Published private(set) var player: AVPlayer?
     @Published private(set) var isPreparing = false
     @Published private(set) var isPlaying = false
-    @Published private(set) var playbackPosition: Double = 0
     @Published var previewVolume: Double = 0.8 {
         didSet { player?.volume = Float(previewVolume) }
     }
     @Published private(set) var error: String?
 
-    private var previewFile: URL?
+    private var renderedPreview: URL?
     private var previewTask: Task<Void, Never>?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var failureObserver: NSObjectProtocol?
-    private var seekGeneration = 0
+    private var seekID: Int?
+    private var nextSeekID = 0
 
     init(media: ClipEditMedia) {
         self.media = media
@@ -40,40 +41,55 @@ final class ClipEditorModel: ObservableObject {
     var canSetStart: Bool { position <= edits.end - minimumLength }
     var canSetEnd: Bool { position >= edits.start + minimumLength }
 
-    func setStart() { if canSetStart { edits.start = position } }
-    func setEnd() { if canSetEnd { edits.end = position } }
+    func setStart() { if canSetStart { moveTrimStart(to: position) } }
+    func setEnd() { if canSetEnd { moveTrimEnd(to: position) } }
 
     func moveTrimStart(to time: Double) {
         let start = min(max(0, time), max(0, edits.end - minimumLength))
-        if start != edits.start { edits.start = start }
-        position = start
+        changeEdits(at: start) { $0.start = start }
     }
 
     func moveTrimEnd(to time: Double) {
         let end = max(min(media.info.duration, time), min(media.info.duration, edits.start + minimumLength))
-        if end != edits.end { edits.end = end }
-        position = end
+        changeEdits(at: end) { $0.end = end }
     }
 
     func resetTrim() {
-        edits.start = 0
-        edits.end = media.info.duration
+        changeEdits {
+            $0.start = 0
+            $0.end = media.info.duration
+        }
     }
 
-    func setCrop(_ crop: PixelCrop?) { edits.crop = crop }
-    func setMuted(_ muted: Bool) { edits.muteOriginal = muted }
-    func setMusicVolume(_ volume: Double) { edits.music?.volume = volume }
-    func removeMusic() { edits.music = nil }
+    func setCrop(_ crop: PixelCrop?) { changeEdits { $0.crop = crop } }
+    func setMuted(_ muted: Bool) { changeEdits { $0.muteOriginal = muted } }
+    func setMusicVolume(_ volume: Double) { changeEdits { $0.music?.volume = volume } }
+    func removeMusic() { changeEdits { $0.music = nil } }
+
+    private func changeEdits(at time: Double? = nil, _ change: (inout ClipEdits) -> Void) {
+        var next = edits
+        change(&next)
+        guard next != edits else {
+            if let time { scrub(to: time) }
+            return
+        }
+        if time == nil { syncPlayhead() }
+        stopPlayback()
+        if let time { position = time }
+        discardPreview()
+        edits = next
+        error = nil
+    }
 
     func chooseMusic() {
+        if isPlaying { pause() }
         let panel = NSOpenPanel()
         panel.title = "Choose Music"
         panel.allowedContentTypes = [.audio]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        edits.music = ClipMusic(url: url, volume: edits.music?.volume ?? 0.5)
-        error = nil
+        changeEdits { $0.music = ClipMusic(url: url, volume: $0.music?.volume ?? 0.5) }
     }
 
     func readFrame(at time: Double) async {
@@ -81,68 +97,105 @@ final class ClipEditorModel: ObservableObject {
             try await Task.sleep(for: .milliseconds(75))
             let data = try await media.frame(at: time)
             try Task.checkCancellation()
-            guard position == time else { return }
+            guard position == time, player == nil else { return }
             guard let image = NSImage(data: data) else {
                 throw SnipperError.problem("No frame is available at this position.")
             }
             frame = image
-            error = nil
         } catch is CancellationError {
             return
         } catch {
-            if position == time { self.error = error.localizedDescription }
+            if position == time, player == nil { self.error = error.localizedDescription }
         }
     }
 
-    func playPreview() {
-        guard !isPreparing, player == nil else { return }
+    func togglePlayback() {
+        if isPlaying {
+            pause()
+            return
+        }
+        if position < edits.start || position >= edits.end { position = edits.start }
         error = nil
+        isPlaying = true
+        if let renderedPreview {
+            openPlayer(renderedPreview)
+            return
+        }
+        if exportEdits == nil, media.clip.format == .mp4 {
+            openPlayer(media.clip.url)
+            return
+        }
         isPreparing = true
         let edits = self.edits
         previewTask = Task { [weak self, media] in
             do {
-                let url = try await media.preview(edits)
+                let file = try await media.preview(edits)
                 guard let self, !Task.isCancelled else {
-                    try? FileManager.default.removeItem(at: url)
+                    try? FileManager.default.removeItem(at: file)
                     return
                 }
-                previewFile = url
-                startPlayback(url)
-                isPreparing = false
+                renderedPreview = file
                 previewTask = nil
+                isPreparing = false
+                openPlayer(file)
             } catch is CancellationError {
                 return
             } catch {
                 guard let self, !Task.isCancelled else { return }
+                stopPlayback()
                 self.error = error.localizedDescription
-                isPreparing = false
-                previewTask = nil
             }
         }
     }
 
-    private func startPlayback(_ url: URL) {
+    func scrub(to time: Double) {
+        position = min(max(0, time), media.info.duration)
+        guard isPlaying else { return }
+        if position >= edits.start && position < edits.end {
+            seekPlayer()
+        } else {
+            stopPlayback()
+        }
+    }
+
+    func skip(by seconds: Double) {
+        syncPlayhead()
+        scrub(to: min(max(edits.start, position + seconds), edits.end))
+    }
+
+    private func pause() {
+        syncPlayhead()
+        stopPlayback()
+    }
+
+    private func syncPlayhead() {
+        guard let player, seekID == nil else { return }
+        let elapsed = player.currentTime().seconds
+        guard elapsed.isFinite else { return }
+        position = min(edits.end, max(edits.start, edits.start + elapsed))
+    }
+
+    private func openPlayer(_ url: URL) {
         let item = AVPlayerItem(url: url)
         let player = AVPlayer(playerItem: item)
         player.volume = Float(previewVolume)
         player.actionAtItemEnd = .pause
         self.player = player
-        playbackPosition = 0
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 20), queue: .main
-        ) { [weak self, weak player] time in
+        ) { [weak self, weak player] _ in
             Task { @MainActor in
-                guard let self, let player, self.player === player, self.seekGeneration == 0 else { return }
-                self.playbackPosition = min(self.edits.duration, max(0, time.seconds))
+                guard let self, let player, self.player === player else { return }
+                self.syncPlayhead()
             }
         }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self, weak player] _ in
             Task { @MainActor in
-                guard let self, let player, self.player === player else { return }
-                self.playbackPosition = self.edits.duration
-                self.isPlaying = false
+                guard let self, let player, self.player === player, self.seekID == nil else { return }
+                self.position = self.edits.end
+                self.stopPlayback()
             }
         }
         failureObserver = NotificationCenter.default.addObserver(
@@ -151,67 +204,60 @@ final class ClipEditorModel: ObservableObject {
             let message = (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription
             Task { @MainActor in
                 guard let self, let player, self.player === player else { return }
-                self.isPlaying = false
+                self.stopPlayback()
+                self.discardPreview()
                 self.error = message ?? "The preview stopped unexpectedly."
             }
         }
-        isPlaying = true
-        player.play()
+        seekPlayer()
     }
 
-    func togglePlayback() {
+    private func seekPlayer() {
         guard let player else { return }
-        if isPlaying {
-            player.pause()
-            isPlaying = false
-        } else {
-            if playbackPosition >= edits.duration - 0.01 { seek(to: 0) }
-            isPlaying = true
-            player.play()
-        }
-    }
-
-    func restart() {
-        guard let player else { return }
-        seek(to: 0)
-        isPlaying = true
-        player.play()
-    }
-
-    private var nextSeekID = 0
-
-    func seek(to time: Double) {
-        guard let player else { return }
-        let target = min(max(time, 0), edits.duration)
-        playbackPosition = target
+        let offset = position - edits.start
         nextSeekID += 1
         let id = nextSeekID
-        seekGeneration = id
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        seekID = id
+        player.seek(to: CMTime(seconds: offset, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak player] finished in
             Task { @MainActor in
-                guard self?.seekGeneration == id else { return }
-                self?.seekGeneration = 0
+                guard let self, let player, self.player === player, self.seekID == id else { return }
+                self.seekID = nil
+                if finished {
+                    player.play()
+                } else {
+                    self.stopPlayback()
+                    self.discardPreview()
+                    self.error = "Could not seek to this position in the preview."
+                }
             }
         }
     }
 
-    func close() {
+    private func stopPlayback() {
         previewTask?.cancel()
         previewTask = nil
         isPreparing = false
-        player?.pause()
+        isPlaying = false
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         timeObserver = nil
         endObserver = nil
         failureObserver = nil
+        player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
-        isPlaying = false
-        seekGeneration = 0
-        if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
-        previewFile = nil
+        seekID = nil
+    }
+
+    private func discardPreview() {
+        if let renderedPreview { try? FileManager.default.removeItem(at: renderedPreview) }
+        renderedPreview = nil
+    }
+
+    func close() {
+        stopPlayback()
+        discardPreview()
     }
 }

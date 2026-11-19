@@ -95,13 +95,13 @@ struct TrimTimeline: View {
         switch drag {
         case .start(let offset): model.moveTrimStart(to: track.time(at: x - offset))
         case .end(let offset): model.moveTrimEnd(to: track.time(at: x - offset))
-        case .playhead: model.position = track.time(at: x)
+        case .playhead: model.scrub(to: track.time(at: x))
         case nil: break
         }
     }
 
     private func scrub(by difference: Double) {
-        model.position = min(model.media.info.duration, max(0, model.position + difference))
+        model.scrub(to: model.position + difference)
     }
 
     private struct Track {

@@ -9,31 +9,16 @@ struct ClipEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let player = model.player {
-                playback(player)
-            } else if model.isPreparing {
-                Spacer()
-                ProgressView("Preparing preview…").frame(maxWidth: .infinity)
-                Spacer()
-            } else {
-                edits
-            }
+            edits
 
             if let error = model.error {
                 Text(error).foregroundStyle(.red).font(.callout).lineLimit(3)
             }
             Divider()
             HStack {
-                if model.isPreparing || model.player != nil {
-                    Button("Back to edits") { model.close() }.keyboardShortcut(.cancelAction)
-                } else {
-                    Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
-                    Button("Play preview") { model.playPreview() }
-                }
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Save", action: save)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.isPreparing)
+                Button("Save", action: save).keyboardShortcut(.defaultAction)
             }
         }
         .padding(18)
@@ -41,15 +26,13 @@ struct ClipEditorView: View {
 
     private var edits: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CropCanvas(frameImage: model.frame, info: model.media.info,
-                       crop: model.edits.crop, onCrop: model.setCrop)
-                .layoutPriority(1)
-                .task(id: model.position) { await model.readFrame(at: model.position) }
+            canvas.layoutPriority(1)
             HStack {
                 Text(timestamp(model.position)).monospacedDigit()
                 TrimTimeline(model: model)
                 Text(timestamp(model.media.info.duration)).monospacedDigit()
             }
+            playbackControls
             HStack {
                 Button("Set start") { model.setStart() }
                     .keyboardShortcut(.leftArrow, modifiers: .option)
@@ -69,7 +52,7 @@ struct ClipEditorView: View {
                     Text("\(crop.width) × \(crop.height)").monospacedDigit().foregroundStyle(.secondary)
                     Button("Clear crop") { model.setCrop(nil) }
                 } else {
-                    Text("Drag on the frame to crop").foregroundStyle(.secondary)
+                    Text(model.isPlaying ? "Pause to crop" : "Drag on the frame to crop").foregroundStyle(.secondary)
                 }
             }
             Divider()
@@ -93,28 +76,41 @@ struct ClipEditorView: View {
         }
     }
 
-    private func playback(_ player: AVPlayer) -> some View {
-        VStack(spacing: 12) {
-            PlayerSurface(player: player)
-                .background(.black)
-                .accessibilityLabel("Video preview")
-                .layoutPriority(1)
-            HStack {
-                Text(timestamp(model.playbackPosition)).monospacedDigit()
-                Slider(value: Binding(get: { model.playbackPosition }, set: model.seek),
-                       in: 0...model.edits.duration) { Text("Seek preview") }
-                    .labelsHidden().accessibilityLabel("Seek preview")
-                Text(timestamp(model.edits.duration)).monospacedDigit()
+    private var canvas: some View {
+        ZStack {
+            if let player = model.player {
+                PlayerSurface(player: player)
+                    .background(.black)
+                    .accessibilityLabel("Video preview")
+            } else {
+                CropCanvas(frameImage: model.frame, info: model.media.info,
+                           crop: model.edits.crop, onCrop: model.setCrop)
+                    .allowsHitTesting(!model.isPlaying)
+                    .task(id: model.position) { await model.readFrame(at: model.position) }
             }
-            HStack {
-                Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayback() }
-                Button("Restart") { model.restart() }
-                Spacer()
-                Slider(value: $model.previewVolume, in: 0...1) { Text("Preview volume") }
-                    .accessibilityLabel("Preview volume")
-                    .frame(maxWidth: 220)
-                Text("\(Int(model.previewVolume * 100))%").monospacedDigit()
+            if model.isPreparing {
+                ProgressView("Preparing playback…")
+                    .padding(12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             }
+        }
+        .frame(minHeight: 100, maxHeight: .infinity)
+    }
+
+    private var playbackControls: some View {
+        HStack {
+            Button(model.isPlaying ? "Pause" : "Play") {
+                if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat { return }
+                model.togglePlayback()
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            Button("Back 5s") { model.skip(by: -5) }
+            Button("Forward 5s") { model.skip(by: 5) }
+            Spacer()
+            Slider(value: $model.previewVolume, in: 0...1) { Text("Preview volume") }
+                .accessibilityLabel("Preview volume")
+                .frame(maxWidth: 220)
+            Text("\(Int(model.previewVolume * 100))%").monospacedDigit()
         }
     }
 
