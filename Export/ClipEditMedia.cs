@@ -92,8 +92,55 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
         return new Bitmap(image);
     }
 
+    public async Task<string> RenderGifAsync(ClipEdits? edits, int longestSide, int frameRate, bool holdLastFrame,
+        CancellationToken cancellationToken)
+    {
+        var start = edits?.Start ?? TimeSpan.Zero;
+        var end = edits?.End ?? Duration;
+        if (start < TimeSpan.Zero || end <= start)
+            throw new ArgumentException("Choose a start time before the end time.");
+
+        var folder = Path.GetDirectoryName(clip.Path)!;
+        var output = Path.Combine(folder, $".editor-gif-{Guid.NewGuid():N}.gif");
+        var palette = Path.ChangeExtension(output, ".png");
+        var crop = edits?.Crop is { } area ? CropFilter(area, edits.SourceSize) : FitTo(VideoSize);
+        var filters = FormattableString.Invariant(
+            $"trim=duration={MediaTool.Seconds(end - start)},setpts=PTS-STARTPTS,fps={frameRate}:round=up,{crop},scale=w='min(iw,{longestSide})':h='min(ih,{longestSide})':force_original_aspect_ratio=decrease:flags=lanczos,setsar=1");
+        string[] source = ["-nostdin", "-v", "error", "-xerror", "-n", "-protocol_whitelist", "file",
+            "-ss", MediaTool.Seconds(start), "-i", previewPath];
+        try
+        {
+            // Two passes let FFmpeg generate one palette without buffering every frame of a long clip.
+            await MediaTool.RunAsync(ffmpeg, [.. source, "-map", "0:v:0", "-an", "-vf", filters + ",palettegen",
+                "-frames:v", "1", "-threads", "1", "-f", "image2", "-update", "1", palette],
+                "Could not prepare the GIF colors.", cancellationToken: cancellationToken).ConfigureAwait(false);
+            await MediaTool.RunAsync(ffmpeg, [.. source, "-protocol_whitelist", "file", "-i", palette,
+                "-filter_complex", $"[0:v:0]{filters}[video];[video][1:v:0]paletteuse=diff_mode=rectangle[gif]",
+                "-map", "[gif]", "-an", "-abort_on", "empty_output_stream", "-loop", "0",
+                "-final_delay", holdLastFrame ? "100" : "-1", "-f", "gif", output],
+                "Could not render the GIF.", cancellationToken: cancellationToken).ConfigureAwait(false);
+            return output;
+        }
+        catch
+        {
+            RecordingExporter.TryDelete(output);
+            throw;
+        }
+        finally
+        {
+            RecordingExporter.TryDelete(palette);
+        }
+    }
+
     public static string FitTo(Size size) => FormattableString.Invariant(
         $"scale={size.Width}:{size.Height}:force_original_aspect_ratio=decrease,pad={size.Width}:{size.Height}:(ow-iw)/2:(oh-ih)/2,setsar=1");
+
+    public static string CropFilter(Rectangle crop, Size size)
+    {
+        if (crop.Width < 2 || crop.Height < 2 || !new Rectangle(Point.Empty, size).Contains(crop))
+            throw new ArgumentException("The crop must fit within the recording.");
+        return FitTo(size) + FormattableString.Invariant($",crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}:exact=1");
+    }
 
     private static async Task<(TimeSpan? Duration, Size Size, bool HasAudio)> ProbeAsync(string ffprobe, string path,
         CancellationToken cancellationToken = default)

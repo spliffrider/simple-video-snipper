@@ -8,6 +8,8 @@ namespace SimpleVideoSnipper;
 internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore store,
     SavePreferences initialPreferences, NotifyIcon tray, GlobalCaptureShortcut shortcut) : IDisposable
 {
+    private enum SaveRetryAction { Cancel, Retry, SaveAs }
+
     private readonly Queue<(PendingClip Clip, bool Ask)> queue = new();
     private readonly HashSet<string> queuedPaths = new(StringComparer.OrdinalIgnoreCase);
     private SavePreferences preferences = initialPreferences;
@@ -212,7 +214,8 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
             {
                 tray.Text = "Simple Video Snipper — Opening editor";
                 using var media = await ClipEditMedia.OpenAsync(clip);
-                using var editor = new ClipEditor(clip.Title, media);
+                using var editor = new ClipEditor(clip.Title, media,
+                    (owner, preview) => SaveGifAsync(owner, clip, settings, preview));
                 var editResult = editor.ShowDialog();
                 await editor.StopPreviewAsync();
                 if (editResult != DialogResult.OK)
@@ -253,10 +256,7 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
                 tray.Text = "Simple Video Snipper";
             }
 
-            notice?.Dispose();
-            notice = new SavedRecordingNotice(result, settings.AutoCopy);
-            NativeCaptureMethods.ExcludeWindow(notice);
-            notice.Show();
+            ShowSavedNotice(result, settings.AutoCopy);
             return;
         }
         NotifyKept();
@@ -266,17 +266,7 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
     {
         var format = previous?.Format ?? settings.Format;
         var folder = previous is { } request ? Path.GetDirectoryName(request.Path) : settings.Folder;
-        if (folder == SavePreferences.DefaultFolder && !Directory.Exists(folder))
-        {
-            try
-            {
-                Directory.CreateDirectory(folder);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // The picker can still offer another directory.
-            }
-        }
+        PrepareDefaultSaveFolder(folder);
         while (true)
         {
             using var picker = new SaveFileDialog
@@ -301,19 +291,110 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
     }
 
     private static ExportRequest? ChooseRetry(PendingClip clip, SavePreferences settings, ExportRequest failed, string error)
+        => ShowSaveRetry(null, "Could not save the recording",
+            error + Environment.NewLine + Environment.NewLine + "The temporary recording is still available.", "Keep for later") switch
+        {
+            SaveRetryAction.Retry => failed,
+            SaveRetryAction.SaveAs => ChooseFile(clip, settings, failed),
+            _ => null,
+        };
+
+    private async Task SaveGifAsync(IWin32Window owner, PendingClip clip, SavePreferences settings, string preview)
+    {
+        var request = ChooseGifFile(owner, clip.Title, settings.Folder);
+        while (request is { } destination)
+        {
+            ExportResult result;
+            try
+            {
+                if (storage.IsInPendingFolder(destination.Path))
+                    throw new IOException("Choose a save location outside the temporary recording files.");
+                tray.Text = "Simple Video Snipper — Saving GIF";
+                result = await RecordingExporter.SaveGifCopyAsync(preview, destination.Path, destination.Replace);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                request = ShowSaveRetry(owner, "Could not save the GIF",
+                    exception.Message + Environment.NewLine + Environment.NewLine + "The GIF preview is still available.", "Back to preview") switch
+                {
+                    SaveRetryAction.Retry => destination,
+                    SaveRetryAction.SaveAs => ChooseGifFile(owner, clip.Title, settings.Folder, destination.Path),
+                    _ => null,
+                };
+                continue;
+            }
+            finally
+            {
+                tray.Text = "Simple Video Snipper";
+            }
+
+            ShowSavedNotice(result, autoCopy: false, owner);
+            return;
+        }
+    }
+
+    private static (string Path, bool Replace)? ChooseGifFile(IWin32Window owner, string title, string folder, string? previous = null)
+    {
+        PrepareDefaultSaveFolder(folder);
+        while (true)
+        {
+            var initialFolder = previous is null ? folder : Path.GetDirectoryName(previous);
+            using var picker = new SaveFileDialog
+            {
+                Title = "Save GIF as", Filter = "Animated GIF (*.gif)|*.gif", DefaultExt = "gif",
+                InitialDirectory = Directory.Exists(initialFolder) ? initialFolder : "",
+                FileName = previous is null ? title : Path.GetFileNameWithoutExtension(previous),
+                AddExtension = true, CheckPathExists = true, OverwritePrompt = false, RestoreDirectory = true,
+            };
+            if (picker.ShowDialog(owner) != DialogResult.OK)
+                return null;
+            var path = Path.ChangeExtension(picker.FileName, ".gif");
+            var replace = File.Exists(path);
+            if (!replace || MessageBox.Show(owner, $"Replace {Path.GetFileName(path)}?", "Save GIF",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
+                return (path, replace);
+            previous = path;
+        }
+    }
+
+    private static void PrepareDefaultSaveFolder(string? folder)
+    {
+        if (folder != SavePreferences.DefaultFolder || Directory.Exists(folder))
+            return;
+        try
+        {
+            Directory.CreateDirectory(folder);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The picker can still offer another directory.
+        }
+    }
+
+    private static SaveRetryAction ShowSaveRetry(IWin32Window? owner, string heading, string text, string cancelText)
     {
         var retry = new TaskDialogButton("Retry");
         var saveAs = new TaskDialogButton("Save As…");
-        var later = new TaskDialogButton("Keep for later");
-        var choice = TaskDialog.ShowDialog(new TaskDialogPage
+        var page = new TaskDialogPage
         {
-            Caption = "Simple Video Snipper", Heading = "Could not save the recording",
-            Text = error + Environment.NewLine + Environment.NewLine + "The temporary recording is still available.",
-            Icon = TaskDialogIcon.Error, Buttons = { retry, saveAs, later }, AllowCancel = true,
-        });
+            Caption = "Simple Video Snipper", Heading = heading, Text = text,
+            Icon = TaskDialogIcon.Error, Buttons = { retry, saveAs, new TaskDialogButton(cancelText) }, AllowCancel = true,
+        };
+        var choice = owner is null ? TaskDialog.ShowDialog(page) : TaskDialog.ShowDialog(owner, page);
         if (choice == retry)
-            return failed;
-        return choice == saveAs ? ChooseFile(clip, settings, failed) : null;
+            return SaveRetryAction.Retry;
+        return choice == saveAs ? SaveRetryAction.SaveAs : SaveRetryAction.Cancel;
+    }
+
+    private void ShowSavedNotice(ExportResult result, bool autoCopy, IWin32Window? owner = null)
+    {
+        notice?.Dispose();
+        notice = new SavedRecordingNotice(result, autoCopy);
+        NativeCaptureMethods.ExcludeWindow(notice);
+        if (owner is null)
+            notice.Show();
+        else
+            notice.Show(owner);
     }
 
     public void OpenSaveFolder()
@@ -339,12 +420,15 @@ internal sealed class SavedRecordingNotice : Form
     private readonly Label state = new() { AutoSize = true, MaximumSize = new Size(430, 0) };
     private readonly string path;
     private readonly string? cleanupWarning;
+    private readonly string fileType;
 
     public SavedRecordingNotice(ExportResult result, bool autoCopy)
     {
         path = result.Path;
         cleanupWarning = result.CleanupWarning;
-        Text = "Recording saved";
+        var gif = Path.GetExtension(path).Equals(".gif", StringComparison.OrdinalIgnoreCase);
+        fileType = gif ? "GIF" : "video";
+        Text = gif ? "GIF saved" : "Recording saved";
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
         StartPosition = FormStartPosition.CenterScreen;
         ShowInTaskbar = false;
@@ -354,7 +438,7 @@ internal sealed class SavedRecordingNotice : Form
 
         var open = new Button { Text = "Open", AutoSize = true };
         var folder = new Button { Text = "Show in folder", AutoSize = true };
-        var copy = new Button { Text = "Copy video file", AutoSize = true };
+        var copy = new Button { Text = $"Copy {fileType} file", AutoSize = true };
         open.Click += (_, _) => Launch(new ProcessStartInfo(path) { UseShellExecute = true });
         folder.Click += (_, _) => Launch(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
         copy.Click += (_, _) => Copy();
@@ -382,11 +466,11 @@ internal sealed class SavedRecordingNotice : Form
         try
         {
             Clipboard.SetDataObject(FileData(path), copy: true, retryTimes: 5, retryDelay: 80);
-            SetStatus("Copied the video file");
+            SetStatus($"Copied the {fileType} file");
         }
         catch (ExternalException)
         {
-            SetStatus("Saved. Clipboard is busy. Use Copy video file to retry.");
+            SetStatus($"Saved. Clipboard is busy. Use Copy {fileType} file to retry.");
         }
     }
 

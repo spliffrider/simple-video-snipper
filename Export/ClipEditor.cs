@@ -33,7 +33,7 @@ internal sealed class ClipEditor : Form
     private int playingEnd;
     private string? musicPath;
 
-    public ClipEditor(string clipTitle, ClipEditMedia media)
+    public ClipEditor(string clipTitle, ClipEditMedia media, Func<IWin32Window, string, Task> saveGif)
     {
         this.media = media;
         Text = $"Edit recording — {clipTitle}";
@@ -51,6 +51,7 @@ internal sealed class ClipEditor : Form
 
         var save = new Button { Text = "Save", AutoSize = true, DialogResult = DialogResult.OK };
         var back = new Button { Text = "Back", AutoSize = true, DialogResult = DialogResult.Cancel };
+        var exportGif = new Button { Text = "Export GIF…", AutoSize = true };
         AcceptButton = save;
         CancelButton = back;
 
@@ -101,7 +102,7 @@ internal sealed class ClipEditor : Form
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         footer.Controls.Add(mute, 0, 0);
         var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right };
-        actions.Controls.AddRange([back, save]);
+        actions.Controls.AddRange([back, exportGif, save]);
         footer.Controls.Add(actions, 1, 0);
 
         var layout = new TableLayoutPanel { RowCount = 8, ColumnCount = 1, Dock = DockStyle.Fill };
@@ -125,6 +126,12 @@ internal sealed class ClipEditor : Form
         resetCrop.Click += (_, _) => preview.ResetCrop();
         addMusic.Click += (_, _) => ChooseMusic();
         removeMusic.Click += (_, _) => SetMusic(null);
+        exportGif.Click += (_, _) =>
+        {
+            PausePlayback(syncPosition: true);
+            using var gif = new GifPreviewDialog(media, Edits, saveGif);
+            gif.ShowDialog(this);
+        };
         play.Click += (_, _) => TogglePlayback();
         rewind.Click += (_, _) => Skip(-5);
         forward.Click += (_, _) => Skip(5);

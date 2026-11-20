@@ -74,8 +74,7 @@ internal static class RecordingExporter
         if (request.UniqueName)
             Directory.CreateDirectory(folder);
 
-        var partial = Path.Combine(folder, $".snipper-{Guid.NewGuid():N}.partial");
-        try
+        destination = await PublishAsync(destination, request.Replace, request.UniqueName, async partial =>
         {
             var reencode = request.Edits is not null || clip.Format != request.Format;
             var ffmpeg = reencode || clip.Format == ExportFormat.WebM ? MediaTool.Find("ffmpeg") : null;
@@ -90,18 +89,34 @@ internal static class RecordingExporter
                     throw new IOException("Editing or changing formats requires FFmpeg. Put ffmpeg.exe beside the app and retry.");
                 await ConvertAsync(ffmpeg, clip, request, partial).ConfigureAwait(false);
             }
+        }).ConfigureAwait(false);
 
+        var deleted = TryDelete(clip.Path);
+        return new ExportResult(destination, deleted ? null : "The final file was saved, but its temporary copy could not be removed.");
+    }
+
+    public static async Task<ExportResult> SaveGifCopyAsync(string previewPath, string destination, bool replace)
+    {
+        var saved = await PublishAsync(Path.GetFullPath(destination), replace, uniqueName: false,
+            partial => CopyAsync(previewPath, partial)).ConfigureAwait(false);
+        return new ExportResult(saved, null);
+    }
+
+    private static async Task<string> PublishAsync(string destination, bool replace, bool uniqueName,
+        Func<string, Task> write)
+    {
+        var partial = Path.Combine(Path.GetDirectoryName(destination)!, $".snipper-{Guid.NewGuid():N}.partial");
+        try
+        {
+            await write(partial).ConfigureAwait(false);
             if (new FileInfo(partial).Length == 0)
                 throw new IOException("The export produced an empty file.");
-            destination = Publish(partial, destination, request);
+            return Publish(partial, destination, replace, uniqueName);
         }
         finally
         {
             TryDelete(partial);
         }
-
-        var deleted = TryDelete(clip.Path);
-        return new ExportResult(destination, deleted ? null : "The final file was saved, but its temporary copy could not be removed.");
     }
 
     private static async Task CopyAsync(string source, string destination)
@@ -113,21 +128,22 @@ internal static class RecordingExporter
         await input.CopyToAsync(output).ConfigureAwait(false);
     }
 
-    private static string Publish(string partial, string requestedPath, ExportRequest request)
+    private static string Publish(string partial, string requestedPath, bool replace, bool uniqueName)
     {
-        if (!request.UniqueName)
+        if (!uniqueName)
         {
-            File.Move(partial, requestedPath, request.Replace);
+            File.Move(partial, requestedPath, replace);
             return requestedPath;
         }
 
         var folder = Path.GetDirectoryName(requestedPath)!;
         var title = Path.GetFileNameWithoutExtension(requestedPath);
+        var extension = Path.GetExtension(requestedPath);
         for (var index = 1; ; index++)
         {
             var candidate = index == 1
                 ? requestedPath
-                : Path.Combine(folder, $"{title} ({index}){request.Format.Extension()}");
+                : Path.Combine(folder, $"{title} ({index}){extension}");
             if (Path.Exists(candidate))
                 continue;
             try
@@ -176,12 +192,7 @@ internal static class RecordingExporter
 
         var filters = new List<string>();
         if (edits?.Crop is { } crop)
-        {
-            if (crop.Width < 2 || crop.Height < 2 || !new Rectangle(Point.Empty, edits.SourceSize).Contains(crop))
-                throw new ArgumentException("The crop must fit within the recording.");
-            filters.Add(ClipEditMedia.FitTo(edits.SourceSize));
-            filters.Add(FormattableString.Invariant($"crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}:exact=1"));
-        }
+            filters.Add(ClipEditMedia.CropFilter(crop, edits.SourceSize));
         if (playback)
             filters.Add("scale=w='min(iw,960)':h='min(ih,540)':force_original_aspect_ratio=decrease");
         if (reencode && (format == ExportFormat.Mp4 || edits?.Crop is not null))
