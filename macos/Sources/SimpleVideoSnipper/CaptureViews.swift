@@ -100,10 +100,19 @@ struct AudioConfigurationView: View {
     let start: (AudioOptions) -> Void
     let cancel: () -> Void
 
-    @State private var systemAudio = false
-    @State private var microphone = false
-    @State private var selectedMic = ""
+    @State private var systemAudio: Bool
+    @State private var microphone: Bool
+    @State private var selectedMic: String
     @StateObject private var meter = MicrophoneMeter()
+
+    init(title: String, defaults: AudioOptions, start: @escaping (AudioOptions) -> Void, cancel: @escaping () -> Void) {
+        self.title = title
+        self.start = start
+        self.cancel = cancel
+        _systemAudio = State(initialValue: defaults.system)
+        _microphone = State(initialValue: defaults.microphone)
+        _selectedMic = State(initialValue: defaults.microphoneID ?? "")
+    }
 
     private var meterKey: String? { microphone ? selectedMic : nil }
 
@@ -113,12 +122,7 @@ struct AudioConfigurationView: View {
             Toggle("System audio", isOn: $systemAudio)
             Toggle("Microphone", isOn: $microphone)
             if microphone {
-                Picker("Input", selection: $selectedMic) {
-                    Text("System default").tag("")
-                    ForEach(meter.devices, id: \.uniqueID) { device in
-                        Text(device.localizedName).tag(device.uniqueID)
-                    }
-                }
+                MicrophoneInputPicker(selection: $selectedMic)
                 ProgressView("Microphone level", value: meter.level)
                     .font(.caption)
                 if let error = meter.error {
@@ -139,7 +143,6 @@ struct AudioConfigurationView: View {
                                        microphoneID: selectedMic.isEmpty ? nil : selectedMic))
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(microphone && !meter.ready)
             }
         }
         .padding(20)
@@ -153,9 +156,7 @@ struct AudioConfigurationView: View {
 
 @MainActor
 private final class MicrophoneMeter: ObservableObject {
-    @Published private(set) var devices = [AVCaptureDevice]()
     @Published private(set) var level = 0.0
-    @Published private(set) var ready = false
     @Published private(set) var error: String?
 
     private let input = MeterInput()
@@ -169,11 +170,7 @@ private final class MicrophoneMeter: ObservableObject {
             error = "Allow microphone access in System Settings → Privacy & Security."
             return
         }
-        devices = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified
-        ).devices
-        guard let device = deviceID.isEmpty
-                ? AVCaptureDevice.default(for: .audio) : devices.first(where: { $0.uniqueID == deviceID }) else {
+        guard let device = AudioOptions.microphoneInput(id: deviceID.isEmpty ? nil : deviceID) else {
             error = "The selected microphone is unavailable."
             return
         }
@@ -186,7 +183,7 @@ private final class MicrophoneMeter: ObservableObject {
             DispatchQueue.main.async {
                 guard self?.generation == current else { return }
                 switch result {
-                case .success: self?.ready = true
+                case .success: break
                 case .failure(let error): self?.error = error.localizedDescription
                 }
             }
@@ -195,7 +192,6 @@ private final class MicrophoneMeter: ObservableObject {
 
     func stop() {
         generation = UUID()
-        ready = false
         level = 0
         error = nil
         input.stop()

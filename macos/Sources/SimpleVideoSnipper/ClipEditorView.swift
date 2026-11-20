@@ -5,6 +5,7 @@ import SwiftUI
 struct ClipEditorView: View {
     @ObservedObject var model: ClipEditorModel
     let save: () -> Void
+    let exportGIF: () -> Void
     let cancel: () -> Void
 
     var body: some View {
@@ -18,6 +19,7 @@ struct ClipEditorView: View {
             HStack {
                 Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
                 Spacer()
+                Button("Export GIF…", action: exportGIF)
                 Button("Save", action: save).keyboardShortcut(.defaultAction)
             }
         }

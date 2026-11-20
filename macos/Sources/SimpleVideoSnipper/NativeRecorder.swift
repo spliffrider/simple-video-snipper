@@ -2,12 +2,6 @@ import AVFoundation
 import Foundation
 import ScreenCaptureKit
 
-struct AudioOptions {
-    var system = false
-    var microphone = false
-    var microphoneID: String?
-}
-
 @MainActor
 final class NativeRecorder: NSObject {
     enum Event {
@@ -178,6 +172,7 @@ extension NativeRecorder: SCRecordingOutputDelegate, SCStreamDelegate {
         Task { @MainActor in
             guard !terminal, !stopping else { return }
             guard began else { finish(.failure(error)); return }
+            onEvent(.notice("ScreenCaptureKit stopped the recording. \(error.localizedDescription)"))
             stopping = true
             onEvent(.finishing)
             waitForFinalFile()

@@ -162,6 +162,20 @@ enum RecordingExporter {
         }.value
     }
 
+    static func saveGIF(_ preview: URL, to destination: URL, replace: Bool) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let scratch = preview.deletingLastPathComponent().resolvingSymlinksInPath().path
+            let folder = destination.deletingLastPathComponent().resolvingSymlinksInPath()
+            guard folder.path != scratch, !folder.path.hasPrefix(scratch + "/") else {
+                throw SnipperError.problem("Choose a location outside the temporary preview folder.")
+            }
+            let partial = folder.appendingPathComponent(".snipper-export-\(UUID().uuidString).gif")
+            defer { try? FileManager.default.removeItem(at: partial) }
+            try FileManager.default.copyItem(at: preview, to: partial)
+            try publish(partial, to: destination, replace: replace)
+        }.value
+    }
+
     private static func export(_ clip: PendingClip, request: ExportRequest, edits: ClipEdits?) async throws -> URL {
         let files = FileManager.default
         let folder: URL

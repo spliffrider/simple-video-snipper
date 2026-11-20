@@ -30,6 +30,10 @@ struct SnipperSettingsView: View {
     @AppStorage("quickSave") private var quickSave = false
     @AppStorage("preferredFormat") private var format = ClipFormat.mp4
     @AppStorage("autoCopy") private var autoCopy = false
+    @AppStorage(AudioOptions.autoStartKey) private var startAreaOnRelease = false
+    @AppStorage(AudioOptions.systemKey) private var defaultSystemAudio = false
+    @AppStorage(AudioOptions.microphoneKey) private var defaultMicrophone = false
+    @AppStorage(AudioOptions.microphoneIDKey) private var defaultMicrophoneID = ""
 
     var body: some View {
         Form {
@@ -54,6 +58,14 @@ struct SnipperSettingsView: View {
                     ForEach(ClipFormat.allCases) { Text($0.label).tag($0) }
                 }
                 Toggle("Copy the saved file to the clipboard", isOn: $autoCopy)
+            }
+            Section("Recording") {
+                Toggle("Start area recording on release", isOn: $startAreaOnRelease)
+                Toggle("System audio by default", isOn: $defaultSystemAudio)
+                Toggle("Microphone by default", isOn: $defaultMicrophone)
+                if defaultMicrophone {
+                    MicrophoneInputPicker(selection: $defaultMicrophoneID)
+                }
             }
             Section("Snip Shortcut") {
                 ShortcutSetting(shortcut: model.snipShortcut)
@@ -127,7 +139,7 @@ struct SavedClipView: View {
                 Button("Open") { NSWorkspace.shared.open(url) }
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 Spacer()
-                Button("Copy video file") {
+                Button(url.pathExtension.lowercased() == "gif" ? "Copy GIF file" : "Copy video file") {
                     copyStatus = Self.copy(url) ? "Copied" : "Could not copy the file. Try again."
                 }
             }
@@ -177,6 +189,8 @@ final class SavePanelFormat {
 
 struct RecordingReadyView: View {
     let title: String
+    let notice: String?
+    let discard: () -> Void
     let save: () -> Void
     let edit: () -> Void
     let later: () -> Void
@@ -186,8 +200,12 @@ struct RecordingReadyView: View {
             Text(title)
                 .font(.headline)
                 .lineLimit(2)
+            if let notice {
+                Text(notice).foregroundStyle(.secondary).lineLimit(3)
+            }
             Spacer(minLength: 0)
             HStack {
+                Button("Discard…", role: .destructive, action: discard)
                 Button("Keep for later", action: later).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Edit", action: edit)

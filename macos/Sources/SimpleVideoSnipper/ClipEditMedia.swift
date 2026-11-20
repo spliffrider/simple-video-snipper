@@ -138,6 +138,40 @@ final class ClipEditMedia: Sendable {
         ], context: "Could not read the preview frame.")
     }
 
+    func renderGIF(_ edits: ClipEdits, preset: GIFPreset, holdLastFrame: Bool) async throws -> URL {
+        let stem = scratch.appendingPathComponent("gif-\(UUID().uuidString)")
+        let output = stem.appendingPathExtension("gif")
+        let palette = stem.appendingPathExtension("png")
+        defer { try? FileManager.default.removeItem(at: palette) }
+        let limit = preset.longestSide
+        let video = (ClipRenderer.trimAndCropFilters(edits) + [
+            "fps=\(preset.frameRate):round=up",
+            "scale=w='min(iw,\(limit))':h='min(ih,\(limit))':force_original_aspect_ratio=decrease:flags=lanczos",
+            "setsar=1",
+        ]).joined(separator: ",")
+        let source = ["-nostdin", "-v", "error", "-n", "-reinit_filter:v", "0",
+                      "-protocol_whitelist", "file", "-i", frameSource.path]
+        do {
+            // Two passes allow a shared palette without buffering the entire clip.
+            _ = try await MediaTool.ffmpeg.run(source + [
+                "-filter_threads", "2", "-map", "0:v:0", "-an", "-vf", video + ",palettegen",
+                "-frames:v", "1", "-threads", "1", "-update", "1", palette.path,
+            ], context: "Could not prepare GIF colors.")
+            try Task.checkCancellation()
+            _ = try await MediaTool.ffmpeg.run(source + [
+                "-protocol_whitelist", "file", "-i", palette.path, "-filter_complex_threads", "2",
+                "-filter_complex", "[0:v:0]\(video)[video];[video][1:v:0]paletteuse=diff_mode=rectangle[gif]",
+                "-map", "[gif]", "-an", "-abort_on", "empty_output_stream", "-loop", "0",
+                "-final_delay", holdLastFrame ? "100" : "-1", output.path,
+            ], context: "Could not render the GIF.")
+            try Task.checkCancellation()
+            return output
+        } catch {
+            try? FileManager.default.removeItem(at: output)
+            throw error
+        }
+    }
+
     func preview(_ edits: ClipEdits) async throws -> URL {
         let output = scratch.appendingPathComponent("preview-\(UUID().uuidString).mp4")
         do {
@@ -200,10 +234,9 @@ enum ClipRenderer {
         }
     }
 
-    private static func filters(for edits: ClipEdits, preview: Bool) -> (filters: String, audio: Bool) {
+    static func trimAndCropFilters(_ edits: ClipEdits) -> [String] {
         let start = MediaTool.seconds(edits.start)
         let end = MediaTool.seconds(edits.end)
-        let length = MediaTool.seconds(edits.duration)
         var video = [
             "setpts=PTS-STARTPTS", "fps=30", "tpad=stop_mode=clone:stop_duration=\(end)",
             "trim=start=\(start):end=\(end)", "setpts=PTS-STARTPTS", edits.source.fitFilter,
@@ -211,6 +244,14 @@ enum ClipRenderer {
         if let crop = edits.crop {
             video.append("crop=\(crop.width):\(crop.height):\(crop.x):\(crop.y):exact=1")
         }
+        return video
+    }
+
+    private static func filters(for edits: ClipEdits, preview: Bool) -> (filters: String, audio: Bool) {
+        let start = MediaTool.seconds(edits.start)
+        let end = MediaTool.seconds(edits.end)
+        let length = MediaTool.seconds(edits.duration)
+        var video = trimAndCropFilters(edits)
         if preview {
             video.append("scale=w='min(iw,960)':h='min(ih,540)':force_original_aspect_ratio=decrease")
         }

@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import ScreenCaptureKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class SnipperModel: ObservableObject {
@@ -39,6 +40,8 @@ final class SnipperModel: ObservableObject {
     private var controls: SnipperPanel?
     private var savedNotice: SnipperPanel?
     private var editor: ClipEditorModel?
+    private var gifPreview: GIFPreviewModel?
+    private var gifSheet: SnipperPanel?
     private var native: NativeRecorder?
     private var companion: CompanionServer?
     private var browserURL: URL?
@@ -76,13 +79,15 @@ final class SnipperModel: ObservableObject {
                     throw SnipperError.problem("The selected display is no longer available.")
                 }
                 let filter = SCContentFilter(display: display, excludingWindows: [])
-                areaSelection.show(on: screen, scale: CGFloat(filter.pointPixelScale)) { [weak self] crop in
+                let autoStart = defaults.bool(forKey: AudioOptions.autoStartKey)
+                areaSelection.show(on: screen, scale: CGFloat(filter.pointPixelScale), startOnRelease: autoStart) { [weak self] crop in
                     guard let self else { return }
-                    if let crop {
-                        confirmAudio(for: .area(display: display, crop: crop),
-                                     title: "Area · \(crop.width) × \(crop.height) px")
+                    guard let crop else { cancelSelection(); return }
+                    let source = CaptureSource.area(display: display, crop: crop)
+                    if autoStart {
+                        startNative(source, audio: AudioOptions.saved(in: defaults))
                     } else {
-                        phase = .idle
+                        confirmAudio(for: source, title: "Area · \(crop.width) × \(crop.height) px")
                     }
                 }
             } catch {
@@ -184,6 +189,7 @@ final class SnipperModel: ObservableObject {
     }
 
     func cleanUpEditor() {
+        closeGIFPreview()
         editor?.close()
         editor?.media.removePreviewFiles()
         editor = nil
@@ -209,7 +215,7 @@ final class SnipperModel: ObservableObject {
             settings.present()
             return
         }
-        let panel = SnipperPanel("Simple Video Snipper Settings", size: CGSize(width: 580, height: 545)) {
+        let panel = SnipperPanel("Simple Video Snipper Settings", size: CGSize(width: 580, height: min(655, (NSScreen.main?.visibleFrame.height ?? 730) - 30))) {
             SnipperSettingsView(model: self)
         }
         panel.onClose = { [weak self] in self?.settings = nil }
@@ -239,7 +245,10 @@ final class SnipperModel: ObservableObject {
         let panel = SnipperPanel("Unsaved recordings", size: CGSize(width: 545, height: 320)) {
             PendingClipsView(clips: storage.pending(), open: { [weak self] clip in
                 self?.review(clip)
-            }, discard: { [weak self] clip in self?.confirmDiscard(clip, refresh: true) })
+            }, discard: { [weak self] clip in
+                guard let self, confirmDiscard(clip) else { return }
+                showPending()
+            })
         }
         showInteraction(panel)
     }
@@ -277,8 +286,8 @@ final class SnipperModel: ObservableObject {
 
     private func confirmAudio(for source: CaptureSource, title: String) {
         guard phase == .selecting else { return }
-        let panel = SnipperPanel("Recording options", size: CGSize(width: 420, height: 255)) {
-            AudioConfigurationView(title: title, start: { [weak self] options in
+        let panel = SnipperPanel("Recording options", size: CGSize(width: 440, height: 280)) {
+            AudioConfigurationView(title: title, defaults: AudioOptions.saved(in: defaults), start: { [weak self] options in
                 self?.startNative(source, audio: options)
             }, cancel: { [weak self] in self?.cancelSelection() })
         }
@@ -307,11 +316,13 @@ final class SnipperModel: ObservableObject {
             }
             native = recorder
             showRecordingControls()
-            previousApp?.activate(options: [])
-            previousApp = nil
             Task {
+                let available = await audio.availableForRecording()
+                captureNotice = available.notice
+                previousApp?.activate(options: [])
+                previousApp = nil
                 do {
-                    try await recorder.start(source: source, audio: audio, to: draft.url)
+                    try await recorder.start(source: source, audio: available.options, to: draft.url)
                 } catch {
                     guard id == captureID else { return }
                     draft.removeIfEmpty()
@@ -342,14 +353,14 @@ final class SnipperModel: ObservableObject {
                     try await NativeAudioMix.combineTracks(in: draft.url)
                     let clip = try draft.publish()
                     resetCapture()
-                    review(clip)
+                    review(clip, notice: captureNotice)
                 } catch {
                     // A source failure may still leave a playable file. Make it available for saving.
                     if await playable(draft.url), let clip = try? draft.publish() {
                         let details = error.localizedDescription
                         resetCapture()
                         alert("The recording ended early", details + " The captured clip is available to save.")
-                        review(clip)
+                        review(clip, notice: captureNotice)
                     } else {
                         draft.removeIfEmpty()
                         resetCapture()
@@ -485,11 +496,14 @@ final class SnipperModel: ObservableObject {
         interaction = nil
     }
 
-    private func review(_ clip: PendingClip) {
+    private func review(_ clip: PendingClip, notice: String? = nil) {
         guard phase == .idle else { return }
         phase = .reviewing
-        let panel = SnipperPanel("Recording ready", size: CGSize(width: 490, height: 133)) {
-            RecordingReadyView(title: clip.title, save: { [weak self] in
+        let panel = SnipperPanel("Recording ready", size: CGSize(width: 505, height: notice == nil ? 133 : 187)) {
+            RecordingReadyView(title: clip.title, notice: notice, discard: { [weak self] in
+                guard let self, confirmDiscard(clip) else { return }
+                keepForLater()
+            }, save: { [weak self] in
                 self?.save(clip)
             }, edit: { [weak self] in
                 self?.openEditor(clip)
@@ -521,6 +535,8 @@ final class SnipperModel: ObservableObject {
                     ClipEditorView(model: editor, save: { [weak self, weak editor] in
                         guard let self, let editor else { return }
                         save(clip, edits: editor.exportEdits)
+                    }, exportGIF: { [weak self] in
+                        self?.showGIFPreview(for: clip)
                     }, cancel: { [weak self] in self?.returnFromEditor(clip) })
                 }
                 panel.onClose = { [weak self] in self?.returnFromEditor(clip) }
@@ -529,6 +545,84 @@ final class SnipperModel: ObservableObject {
                 phase = .idle
                 alert("Could not open the editor", error.localizedDescription)
                 review(clip)
+            }
+        }
+    }
+
+    private func showGIFPreview(for clip: PendingClip) {
+        guard phase == .editing, let parent = interaction, let editor, gifSheet == nil else { return }
+        if editor.isPlaying { editor.togglePlayback() }
+        let preview = GIFPreviewModel(media: editor.media, edits: editor.edits)
+        let size = CGSize(width: min(760, parent.frame.width), height: min(540, parent.frame.height - 30))
+        let sheet = SnipperPanel("Export GIF", size: size) {
+            GIFPreviewView(model: preview, save: { [weak self, weak preview] in
+                guard let preview else { return }
+                self?.saveGIF(preview, title: clip.title)
+            }, close: { [weak self] in self?.closeGIFPreview() })
+        }
+        sheet.styleMask.remove(.closable)
+        sheet.onClose = { [weak self] in self?.closeGIFPreview() }
+        gifPreview = preview
+        gifSheet = sheet
+        parent.beginSheet(sheet)
+        preview.render()
+    }
+
+    private func closeGIFPreview() {
+        gifPreview?.close()
+        gifPreview = nil
+        guard let sheet = gifSheet else { return }
+        gifSheet = nil
+        sheet.onClose = nil
+        sheet.sheetParent?.endSheet(sheet)
+        sheet.orderOut(nil)
+    }
+
+    private func chooseGIFDestination(title: String) -> (url: URL, replace: Bool)? {
+        let panel = NSSavePanel()
+        panel.title = "Save GIF"
+        panel.allowedContentTypes = [.gif]
+        panel.isExtensionHidden = false
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = title + ".gif"
+        panel.directoryURL = FileManager.default.fileExists(atPath: exportFolder.path)
+            ? exportFolder : exportFolder.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return (url, FileManager.default.fileExists(atPath: url.path))
+    }
+
+    private func saveGIF(_ model: GIFPreviewModel, title: String) {
+        guard let source = model.beginSave() else { return }
+        phase = .saving
+        Task {
+            defer {
+                model.finishSave()
+                phase = .editing
+            }
+            var request = chooseGIFDestination(title: title)
+            while let (url, replace) = request {
+                do {
+                    guard !storage.containsStaging(url) else {
+                        throw SnipperError.problem("Choose a save location outside the temporary recording files.")
+                    }
+                    try await RecordingExporter.saveGIF(source, to: url, replace: replace)
+                    closeGIFPreview()
+                    showSaved(url)
+                    return
+                } catch {
+                    let dialog = NSAlert()
+                    dialog.alertStyle = .warning
+                    dialog.messageText = "Could not save the GIF"
+                    dialog.informativeText = "\(error.localizedDescription) The preview is still available."
+                    dialog.addButton(withTitle: "Retry")
+                    dialog.addButton(withTitle: "Save As…")
+                    dialog.addButton(withTitle: "Back to Preview").keyEquivalent = "\u{1b}"
+                    switch dialog.runModal() {
+                    case .alertFirstButtonReturn: break
+                    case .alertSecondButtonReturn: request = chooseGIFDestination(title: title)
+                    default: request = nil
+                    }
+                }
             }
         }
     }
@@ -611,26 +705,27 @@ final class SnipperModel: ObservableObject {
         case .alertFirstButtonReturn: return request
         case .alertSecondButtonReturn: return showSavePanel(for: clip, format: request.format)
         case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
-            confirmDiscard(clip, refresh: false)
+            confirmDiscard(clip)
             return nil
         default: return nil
         }
     }
 
-    private func confirmDiscard(_ clip: PendingClip, refresh: Bool) {
+    @discardableResult
+    private func confirmDiscard(_ clip: PendingClip) -> Bool {
         let dialog = NSAlert()
         dialog.alertStyle = .warning
         dialog.messageText = "Discard this recording?"
         dialog.informativeText = clip.title
         dialog.addButton(withTitle: "Keep Recording").keyEquivalent = "\r"
         dialog.addButton(withTitle: "Discard").hasDestructiveAction = true
-        if dialog.runModal() == .alertSecondButtonReturn {
-            do {
-                try FileManager.default.removeItem(at: clip.url)
-                if refresh { showPending() }
-            } catch {
-                alert("Could not discard the recording", error.localizedDescription)
-            }
+        guard dialog.runModal() == .alertSecondButtonReturn else { return false }
+        do {
+            try FileManager.default.removeItem(at: clip.url)
+            return true
+        } catch {
+            alert("Could not discard the recording", error.localizedDescription)
+            return false
         }
     }
 
@@ -638,7 +733,8 @@ final class SnipperModel: ObservableObject {
         let autoCopy = defaults.bool(forKey: "autoCopy")
         let copied = autoCopy && SavedClipView.copy(url)
         savedNotice?.close()
-        let panel = SnipperPanel("Recording saved", size: CGSize(width: 485, height: 125)) {
+        let title = url.pathExtension.lowercased() == "gif" ? "GIF saved" : "Recording saved"
+        let panel = SnipperPanel(title, size: CGSize(width: 485, height: 125)) {
             SavedClipView(url: url, initiallyCopied: copied)
         }
         panel.onClose = { [weak self] in self?.savedNotice = nil }

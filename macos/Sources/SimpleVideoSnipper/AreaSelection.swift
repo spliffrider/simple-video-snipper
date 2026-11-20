@@ -5,7 +5,7 @@ final class AreaSelection {
     private var panel: NSPanel?
     private var complete: ((AreaCrop?) -> Void)?
 
-    func show(on screen: NSScreen, scale: CGFloat, complete: @escaping (AreaCrop?) -> Void) {
+    func show(on screen: NSScreen, scale: CGFloat, startOnRelease: Bool, complete: @escaping (AreaCrop?) -> Void) {
         self.complete = complete
         let panel = SelectionPanel(
             contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false, screen: screen
@@ -19,7 +19,8 @@ final class AreaSelection {
         panel.hasShadow = false
         panel.acceptsMouseMovedEvents = true
 
-        let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size), scale: scale)
+        let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size), scale: scale,
+                                 startOnRelease: startOnRelease)
         view.complete = { [weak self] in self?.finish($0) }
         panel.contentView = view
         self.panel = panel
@@ -46,6 +47,7 @@ private final class SelectionPanel: NSPanel {
 
 private final class SelectionView: NSView {
     private let scale: CGFloat
+    private let startOnRelease: Bool
     private var anchor: CGPoint?
     private var crop: AreaCrop?
     private var draggingExisting = false
@@ -54,9 +56,11 @@ private final class SelectionView: NSView {
 
     var complete: ((AreaCrop?) -> Void)?
 
-    init(frame: CGRect, scale: CGFloat) {
+    init(frame: CGRect, scale: CGFloat, startOnRelease: Bool) {
         self.scale = scale
+        self.startOnRelease = startOnRelease
         super.init(frame: frame)
+        directions.stringValue = selectionInstruction
         directions.textColor = .white
         directions.font = .systemFont(ofSize: 15, weight: .semibold)
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelSelection))
@@ -65,7 +69,7 @@ private final class SelectionView: NSView {
         confirm.action = #selector(confirmSelection)
         confirm.keyEquivalent = "\r"
         confirm.isEnabled = false
-        let controls = NSStackView(views: [directions, cancel, confirm])
+        let controls = NSStackView(views: startOnRelease ? [directions, cancel] : [directions, cancel, confirm])
         controls.spacing = 12
         controls.translatesAutoresizingMaskIntoConstraints = false
         addSubview(controls)
@@ -122,13 +126,32 @@ private final class SelectionView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let anchor else { return }
         let point = convert(event.locationInWindow, from: nil)
+        updateSelection(anchor: anchor, point: point)
+    }
+
+    private func updateSelection(anchor: CGPoint, point: CGPoint) {
         let x = draggingExisting ? max(point.x, anchor.x + 2) : point.x
         let y = draggingExisting ? min(point.y, anchor.y - 2) : point.y
         let rect = CGRect(x: anchor.x, y: anchor.y, width: x - anchor.x, height: y - anchor.y).standardized
         update(AreaCrop(selection: rect, displaySize: bounds.size, scale: scale))
     }
 
-    override func mouseUp(with event: NSEvent) { anchor = nil }
+    override func mouseUp(with event: NSEvent) {
+        guard let anchor else { return }
+        self.anchor = nil
+        updateSelection(anchor: anchor, point: convert(event.locationInWindow, from: nil))
+        guard startOnRelease, let crop else { return }
+        if crop.width >= 32, crop.height >= 32 {
+            complete?(crop)
+        } else {
+            update(nil)
+            directions.stringValue = "Select at least 32 × 32 px"
+        }
+    }
+
+    private var selectionInstruction: String {
+        startOnRelease ? "Drag to start recording" : "Drag to select an area"
+    }
     override func cancelOperation(_ sender: Any?) { cancelSelection() }
 
     private func update(_ crop: AreaCrop?) {
@@ -137,7 +160,7 @@ private final class SelectionView: NSView {
             directions.stringValue = "\(crop.width) × \(crop.height) px"
             confirm.isEnabled = true
         } else {
-            directions.stringValue = "Drag to select an area"
+            directions.stringValue = selectionInstruction
             confirm.isEnabled = false
         }
         needsDisplay = true
