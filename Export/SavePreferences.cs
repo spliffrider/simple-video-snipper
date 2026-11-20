@@ -17,6 +17,8 @@ internal sealed record SavePreferences
     public ExportFormat Format { get; init; }
     public string Folder { get; init; } = DefaultFolder;
     public bool AutoCopy { get; init; }
+    public bool StartAreaOnSelection { get; init; }
+    public AudioSelection CaptureAudio { get; init; }
     public string? TemporaryFolder { get; init; }
     public string[] PreviousTemporaryFolders { get; init; } = [];
     public CaptureShortcut SnipShortcut { get; init; } = CaptureShortcut.Default;

@@ -209,9 +209,11 @@ internal static class Program
                 AudioSelection audio;
                 try
                 {
-                    var selection = windowMode ? ChooseWindow() : ChooseArea();
-                    using var options = selection is null ? null : new AudioOptionsDialog();
-                    if (selection is null || options!.ShowDialog() != DialogResult.OK)
+                    var startOnRelease = !windowMode && saves.StartAreaOnSelection;
+                    var savedAudio = saves.CaptureAudio;
+                    var selection = windowMode ? ChooseWindow() : ChooseArea(startOnRelease);
+                    using var options = selection is null || startOnRelease ? null : new AudioOptionsDialog(savedAudio);
+                    if (selection is null || (options is not null && options.ShowDialog() != DialogResult.OK))
                     {
                         if (showWindowOnCancel)
                             window.Show();
@@ -219,7 +221,7 @@ internal static class Program
                     }
 
                     target = selection.Value;
-                    audio = options.Selection;
+                    audio = options?.Selection ?? savedAudio;
                 }
                 finally
                 {
@@ -262,9 +264,9 @@ internal static class Program
                 saves.Enqueue(new PendingClip(staged, ExportFormat.Mp4));
         }
 
-        private static CaptureTarget? ChooseArea()
+        private static CaptureTarget? ChooseArea(bool startOnRelease)
         {
-            using var overlay = new AreaSelectionOverlay(Screen.FromPoint(Cursor.Position));
+            using var overlay = new AreaSelectionOverlay(Screen.FromPoint(Cursor.Position), startOnRelease);
             NativeCaptureMethods.ExcludeWindow(overlay);
             return overlay.ShowDialog() == DialogResult.OK && !overlay.Selection.Region.IsEmpty
                 ? CaptureTarget.FromArea(overlay.Selection)

@@ -7,6 +7,8 @@ internal sealed class SaveSettingsDialog : Form
     private readonly TextBox folder = new() { Width = 340 };
     private readonly TextBox temporaryFolder = new() { Width = 340 };
     private readonly CheckBox copy = new() { Text = "Automatically copy the saved video file", AutoSize = true };
+    private readonly CheckBox startArea = new() { Text = "Start recording immediately", AutoSize = true };
+    private AudioSelection captureAudio;
     private readonly (ShortcutModifiers Modifier, CheckBox Box)[] modifiers =
     [
         (ShortcutModifiers.Control, new CheckBox { Text = "Ctrl", AutoSize = true }),
@@ -38,6 +40,8 @@ internal sealed class SaveSettingsDialog : Form
         temporaryFolder.Text = currentTemporaryFolder;
         temporaryFolder.AccessibleName = "Temporary recordings folder";
         copy.Checked = preferences.AutoCopy;
+        startArea.Checked = preferences.StartAreaOnSelection;
+        captureAudio = preferences.CaptureAudio;
         shortcutKey.Items.AddRange(CaptureShortcut.AvailableKeys.Select(key => (object)CaptureShortcut.KeyName(key)).ToArray());
         SetShortcut(preferences.SnipShortcut);
         foreach (var (_, box) in modifiers)
@@ -51,6 +55,29 @@ internal sealed class SaveSettingsDialog : Form
 
         var browse = BrowseButton(folder, "Choose the save folder");
         var browseTemporary = BrowseButton(temporaryFolder, "Choose the temporary recordings folder");
+        var audioSummary = new Label { AutoSize = true, Margin = new Padding(3, 7, 4, 0) };
+        UpdateAudioSummary();
+        var editAudio = new Button { Text = "Choose devices…", AutoSize = true };
+        editAudio.Click += (_, _) =>
+        {
+            try
+            {
+                using var devices = new AudioOptionsDialog(captureAudio, editingDefaults: true);
+                if (devices.ShowDialog(this) == DialogResult.OK)
+                {
+                    captureAudio = devices.Selection;
+                    UpdateAudioSummary();
+                }
+            }
+            catch (System.Runtime.InteropServices.COMException exception)
+            {
+                MessageBox.Show(this, exception.Message, "Could not open recording audio settings",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+        var audioChoices = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        audioChoices.Controls.AddRange([audioSummary, editAudio]);
+
         var save = new Button { Text = "Save settings", AutoSize = true };
         save.Click += (_, _) =>
         {
@@ -83,12 +110,24 @@ internal sealed class SaveSettingsDialog : Form
         layout.Controls.Add(reset, 2, 5);
         layout.Controls.Add(shortcutError, 1, 6);
         layout.SetColumnSpan(shortcutError, 2);
+        layout.Controls.Add(new Label { Text = "Recording audio", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 7);
+        layout.Controls.Add(audioChoices, 1, 7);
+        layout.Controls.Add(new Label { Text = "After drawing an area", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 8);
+        layout.Controls.Add(startArea, 1, 8);
         var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
         buttons.Controls.AddRange([save, cancel]);
-        layout.Controls.Add(buttons, 1, 7);
+        layout.Controls.Add(buttons, 1, 9);
         Controls.Add(layout);
         AcceptButton = save;
         CancelButton = cancel;
+
+        void UpdateAudioSummary() => audioSummary.Text = (captureAudio.MicrophoneId is not null, captureAudio.OutputId is not null) switch
+        {
+            (true, true) => "Microphone + system audio",
+            (true, false) => "Microphone",
+            (false, true) => "System audio",
+            _ => "Audio off",
+        };
     }
 
     public SavePreferences Preferences => new()
@@ -97,6 +136,8 @@ internal sealed class SaveSettingsDialog : Form
         Format = format.SelectedIndex == 1 ? ExportFormat.WebM : ExportFormat.Mp4,
         Folder = folder.Text.Trim(),
         AutoCopy = copy.Checked,
+        StartAreaOnSelection = startArea.Checked,
+        CaptureAudio = captureAudio,
         TemporaryFolder = temporaryFolder.Text.Trim(),
         SnipShortcut = SelectedShortcut,
     };

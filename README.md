@@ -19,11 +19,13 @@ For repeatable clean-install and upgrade tests, build two versions with the same
 Run `dotnet run -c Release` with the .NET 10 SDK.
 
 1. For an area, move the pointer to the display you want and press **Ctrl+Alt+R**, or choose **Record area**. Draw a rectangle, adjust it with its lower-right handle, and choose **Continue**. For a window, choose **Record window**, select an app window, and choose **Continue**.
-2. Turn on **Microphone**, **System audio**, or both before choosing **Record**. Both start off. Select a mic and check its level. For system audio, choose the output the sound is playing through. The list initially selects the Windows default.
+2. Before choosing **Record**, review the microphone and system audio choices. Select a mic and check its level. For system audio, choose the output the sound is playing through. Use **Settings → Recording audio** to set the defaults for area and window capture.
 3. Use the floating **Stop recording** button or the tray menu. The shortcut brings the recording controls forward. If the selected window resizes, the video keeps its original dimensions and fits the new window inside the frame.
 4. Finish in the desktop save flow. Recordings with audio contain one mix.
 
 Change the global area shortcut under **Settings → Snip shortcut**. Choose modifiers and a key, then save. **Use default** selects **Ctrl+Alt+R**. If Windows rejects a combination, the current shortcut stays active. [Hotkey registration](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)
+
+To capture an area in one step, enable **Settings → After drawing an area → Start recording immediately**. Releasing a valid rectangle starts recording with your saved audio choices.
 
 ## Try the Chrome recording prototype
 
@@ -36,7 +38,7 @@ Install the .NET 10 SDK and Chrome, then run `dotnet run -c Release` on Windows.
 
 ## Save and share recordings
 
-After Stop, choose **Save**, **Edit**, or **Keep for later**. In **Edit**, drag the two timeline handles to trim. Click the track to scrub, or use **Set start** and **Set end** to trim at the playhead. Pause and drag on the preview to crop. **Add music** mixes a local audio file from the start of the edited clip. Adjust its volume or choose **Mute original audio** for music alone. Press **Space** or click **Play** to play or pause the edited clip in the editor. **Back 5s** and **Forward 5s** move the playhead within the kept range. Use **Save** to export the edits.
+After Stop, choose **Save**, **Edit**, **Keep for later**, or **Discard**. Discard asks before deleting the temporary recording. In **Edit**, drag the two timeline handles to trim. Click the track to scrub, or use **Set start** and **Set end** to trim at the playhead. Pause and drag on the preview to crop. **Add music** mixes a local audio file from the start of the edited clip. Adjust its volume or choose **Mute original audio** for music alone. Press **Space** or click **Play** to play or pause the edited clip in the editor. **Back 5s** and **Forward 5s** move the playhead within the kept range. Use **Save** to export the edits.
 
 Choose **Export GIF…** to preview a silent loop of the trimmed and cropped clip. Use **Small** for up to 480 pixels and 10 fps, or **Clear** for up to 720 pixels and 12 fps. Both presets limit the longest side. Switch between **Fit** and **Actual size**, pause playback, or hold the final frame for one second. **Save GIF…** saves the preview as a separate file and keeps the original recording available in the editor.
 

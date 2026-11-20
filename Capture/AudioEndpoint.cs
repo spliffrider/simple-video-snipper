@@ -5,10 +5,7 @@ using NAudio.Wave;
 
 namespace SimpleVideoSnipper;
 
-internal readonly record struct AudioSelection(string? MicrophoneId, string? OutputId)
-{
-    public bool Enabled => MicrophoneId is not null || OutputId is not null;
-}
+internal readonly record struct AudioSelection(string? MicrophoneId, string? OutputId);
 
 internal sealed class AudioEndpoint : IDisposable
 {

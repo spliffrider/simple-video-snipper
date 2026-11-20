@@ -16,9 +16,23 @@ internal static class ScreenRecorder
         Task stopRequested, IProgress<string>? audioStatus)
     {
         using var frames = new CaptureFrames(target);
-        using var mic = options.MicrophoneId is { } id ? new AudioEndpoint(id) : null;
-        using var system = options.OutputId is { } outputId ? new AudioEndpoint(outputId, loopback: true) : null;
-        await Task.WhenAll(mic?.Ready ?? Task.CompletedTask, system?.Ready ?? Task.CompletedTask).ConfigureAwait(false);
+        using var microphone = options.MicrophoneId is { } id ? new AudioEndpoint(id) : null;
+        using var loopback = options.OutputId is { } outputId ? new AudioEndpoint(outputId, loopback: true) : null;
+        var audioWarnings = new HashSet<string>();
+        try
+        {
+            await Task.WhenAll(microphone?.Ready ?? Task.CompletedTask, loopback?.Ready ?? Task.CompletedTask)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // A device saved in Settings may have been disconnected before recording.
+            ReportAudioWarning(microphone?.Error);
+            ReportAudioWarning(loopback?.Error);
+        }
+        var mic = microphone?.Ready.IsCompletedSuccessfully == true ? microphone : null;
+        var system = loopback?.Ready.IsCompletedSuccessfully == true ? loopback : null;
+        var hasAudio = mic is not null || system is not null;
         var stop = Task.WhenAny(stopRequested, frames.Closed);
         var firstFrame = frames.Ready.WaitAsync(TimeSpan.FromSeconds(5));
         if (await Task.WhenAny(firstFrame, stop).ConfigureAwait(false) == stop)
@@ -41,12 +55,12 @@ internal static class ScreenRecorder
         input.FrameRate.Denominator = 1;
         var video = new VideoStreamDescriptor(input);
         var pcm = AudioEncodingProperties.CreatePcm(AudioEndpoint.Rate, AudioEndpoint.Channels, 16);
-        var source = options.Enabled
+        var source = hasAudio
             ? new MediaStreamSource(video, new AudioStreamDescriptor(pcm))
             : new MediaStreamSource(video);
         source.BufferTime = TimeSpan.Zero;
         var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD720p);
-        profile.Audio = options.Enabled ? AudioEncodingProperties.CreateAac(AudioEndpoint.Rate, AudioEndpoint.Channels, 192_000) : null;
+        profile.Audio = hasAudio ? AudioEncodingProperties.CreateAac(AudioEndpoint.Rate, AudioEndpoint.Channels, 192_000) : null;
         profile.Video.Width = width;
         profile.Video.Height = height;
         profile.Video.FrameRate.Numerator = FrameRate;
@@ -57,7 +71,6 @@ internal static class ScreenRecorder
         long frameCount = 0;
         long audioFrame = 0;
         Exception? captureError = null;
-        var audioWarnings = new HashSet<string>();
         source.Starting += (_, args) => args.Request.SetActualStartPosition(TimeSpan.Zero);
         source.SampleRequested += async (_, args) =>
         {

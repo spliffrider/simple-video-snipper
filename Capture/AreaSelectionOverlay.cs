@@ -25,11 +25,13 @@ internal sealed class AreaSelectionOverlay : Form
     private readonly nint monitor;
     private readonly Bitmap snapshot;
     private readonly FlowLayoutPanel actions;
+    private readonly bool startOnRelease;
     private Rectangle area;
     private Point? anchor;
 
-    public AreaSelectionOverlay(Screen screen)
+    public AreaSelectionOverlay(Screen screen, bool startOnRelease)
     {
+        this.startOnRelease = startOnRelease;
         display = screen.Bounds;
         monitor = NativeCaptureMethods.MonitorFromPoint(
             new Point(display.Left + display.Width / 2, display.Top + display.Height / 2), 0);
@@ -100,7 +102,8 @@ internal sealed class AreaSelectionOverlay : Form
 
         var text = anchor is not null || actions.Visible
             ? $"{area.Width} × {area.Height} px"
-            : "Drag to select an area. Press Esc to cancel.";
+            : startOnRelease ? "Drag to start recording. Press Esc to cancel."
+                : "Drag to select an area. Press Esc to cancel.";
         TextRenderer.DrawText(e.Graphics, text, Font, new Point(12, 12), Color.White, Color.Black);
     }
 
@@ -132,22 +135,37 @@ internal sealed class AreaSelectionOverlay : Form
             return;
 
         UpdateArea(e.Location);
-        FinishDrag();
+        FinishDrag(released: true);
     }
 
     protected override void OnMouseCaptureChanged(EventArgs e)
     {
         base.OnMouseCaptureChanged(e);
         if (anchor is not null && !Capture)
-            FinishDrag();
+            FinishDrag(released: false);
     }
 
-    private void FinishDrag()
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if (keyData == Keys.Escape)
+        {
+            DialogResult = DialogResult.Cancel;
+            return true;
+        }
+        return base.ProcessDialogKey(keyData);
+    }
+
+    private void FinishDrag(bool released)
     {
         anchor = null;
         Capture = false;
-        if (area.Width >= MinimumSide && area.Height >= MinimumSide)
+        if (area.Width >= MinimumSide && area.Height >= MinimumSide && (!startOnRelease || released))
         {
+            if (startOnRelease)
+            {
+                DialogResult = DialogResult.OK;
+                return;
+            }
             var toolbar = actions.GetPreferredSize(Size.Empty);
             var x = Math.Clamp(area.Left, 0, Math.Max(0, ClientSize.Width - toolbar.Width));
             var y = area.Bottom + 10;

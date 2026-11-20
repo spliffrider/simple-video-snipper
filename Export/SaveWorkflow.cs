@@ -19,6 +19,8 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
 
     public bool Busy => processing || choosing;
     public string SaveFolder => preferences.Folder;
+    public bool StartAreaOnSelection => preferences.StartAreaOnSelection;
+    public AudioSelection CaptureAudio => preferences.CaptureAudio;
 
     public void Start(string? warning)
     {
@@ -103,15 +105,8 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
         var discard = new Button { Text = "Discard", AutoSize = true };
         discard.Click += (_, _) =>
         {
-            if (list.SelectedItem is not PendingClip clip ||
-                MessageBox.Show(picker, $"Discard {clip.Title}?", picker.Text, MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            if (list.SelectedItem is not PendingClip clip || !ConfirmDiscard(clip, picker))
                 return;
-            if (!RecordingExporter.TryDelete(clip.Path))
-            {
-                MessageBox.Show(picker, "The temporary file could not be removed. Try again later.", picker.Text);
-                return;
-            }
             list.Items.Remove(clip);
             if (list.Items.Count > 0)
                 list.SelectedIndex = 0;
@@ -130,6 +125,20 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
         picker.CancelButton = close;
         if (picker.ShowDialog() == DialogResult.OK && list.SelectedItem is PendingClip chosen)
             Enqueue(chosen, ask: true);
+    }
+
+    private static bool ConfirmDiscard(PendingClip clip, IWin32Window? owner = null)
+    {
+        const string caption = "Discard recording";
+        var message = $"Discard {clip.Title}?{Environment.NewLine}{Environment.NewLine}This deletes the temporary recording.";
+        if (MessageBox.Show(owner, message, caption, MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return false;
+        if (RecordingExporter.TryDelete(clip.Path))
+            return true;
+        MessageBox.Show(owner, "The temporary file could not be removed. Try again later.", caption,
+            MessageBoxButtons.OK, MessageBoxIcon.Error);
+        return false;
     }
 
     private PendingClip[] Pending()
@@ -197,13 +206,20 @@ internal sealed class SaveWorkflow(RecordingStorage storage, PreferencesStore st
             var save = new TaskDialogButton("Save");
             var edit = new TaskDialogButton("Edit");
             var later = new TaskDialogButton("Keep for later");
+            var discard = new TaskDialogButton("Discard");
             var action = TaskDialog.ShowDialog(new TaskDialogPage
             {
                 Caption = "Simple Video Snipper", Heading = "Recording ready", Text = clip.Title,
-                Buttons = { save, edit, later }, AllowCancel = true, DefaultButton = save,
+                Buttons = { save, edit, later, discard }, AllowCancel = true, DefaultButton = save,
             });
             if (action == save)
                 break;
+            if (action == discard)
+            {
+                if (ConfirmDiscard(clip))
+                    return;
+                continue;
+            }
             if (action != edit)
             {
                 NotifyKept();
