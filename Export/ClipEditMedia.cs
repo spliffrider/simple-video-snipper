@@ -93,7 +93,7 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
     }
 
     public async Task<string> RenderGifAsync(ClipEdits? edits, int longestSide, int frameRate, bool holdLastFrame,
-        CancellationToken cancellationToken)
+        GifCaption? caption, CancellationToken cancellationToken)
     {
         var start = edits?.Start ?? TimeSpan.Zero;
         var end = edits?.End ?? Duration;
@@ -102,7 +102,8 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
 
         var folder = Path.GetDirectoryName(clip.Path)!;
         var output = Path.Combine(folder, $".editor-gif-{Guid.NewGuid():N}.gif");
-        var palette = Path.ChangeExtension(output, ".png");
+        var palette = Path.ChangeExtension(output, ".palette.png");
+        var overlay = Path.ChangeExtension(output, ".caption.png");
         var crop = edits?.Crop is { } area ? CropFilter(area, edits.SourceSize) : FitTo(VideoSize);
         var filters = FormattableString.Invariant(
             $"trim=duration={MediaTool.Seconds(end - start)},setpts=PTS-STARTPTS,fps={frameRate}:round=up,{crop},scale=w='min(iw,{longestSide})':h='min(ih,{longestSide})':force_original_aspect_ratio=decrease:flags=lanczos,setsar=1");
@@ -110,12 +111,25 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
             "-ss", MediaTool.Seconds(start), "-i", previewPath];
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            string[] captionInput = [];
+            var video = $"[0:v:0]{filters}";
+            var paletteIndex = 1;
+            if (caption is not null)
+            {
+                caption.WriteOverlay(overlay, edits?.Crop?.Size ?? VideoSize, longestSide);
+                captionInput = ["-protocol_whitelist", "file", "-i", overlay];
+                video += "[base];[base][1:v:0]overlay=format=rgb";
+                paletteIndex++;
+            }
+
             // Two passes let FFmpeg generate one palette without buffering every frame of a long clip.
-            await MediaTool.RunAsync(ffmpeg, [.. source, "-map", "0:v:0", "-an", "-vf", filters + ",palettegen",
+            await MediaTool.RunAsync(ffmpeg, [.. source, .. captionInput, "-filter_complex", $"{video},palettegen[colors]",
+                "-map", "[colors]", "-an",
                 "-frames:v", "1", "-threads", "1", "-f", "image2", "-update", "1", palette],
                 "Could not prepare the GIF colors.", cancellationToken: cancellationToken).ConfigureAwait(false);
-            await MediaTool.RunAsync(ffmpeg, [.. source, "-protocol_whitelist", "file", "-i", palette,
-                "-filter_complex", $"[0:v:0]{filters}[video];[video][1:v:0]paletteuse=diff_mode=rectangle[gif]",
+            await MediaTool.RunAsync(ffmpeg, [.. source, .. captionInput, "-protocol_whitelist", "file", "-i", palette,
+                "-filter_complex", $"{video}[video];[video][{paletteIndex}:v:0]paletteuse=diff_mode=rectangle[gif]",
                 "-map", "[gif]", "-an", "-abort_on", "empty_output_stream", "-loop", "0",
                 "-final_delay", holdLastFrame ? "100" : "-1", "-f", "gif", output],
                 "Could not render the GIF.", cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -129,6 +143,8 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
         finally
         {
             RecordingExporter.TryDelete(palette);
+            if (caption is not null)
+                RecordingExporter.TryDelete(overlay);
         }
     }
 

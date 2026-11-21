@@ -32,6 +32,7 @@ internal sealed class ClipEditor : Form
     private int playingStart;
     private int playingEnd;
     private string? musicPath;
+    private GifCaption? gifCaption;
 
     public ClipEditor(string clipTitle, ClipEditMedia media, Func<IWin32Window, string, Task> saveGif)
     {
@@ -129,8 +130,9 @@ internal sealed class ClipEditor : Form
         exportGif.Click += (_, _) =>
         {
             PausePlayback(syncPosition: true);
-            using var gif = new GifPreviewDialog(media, Edits, saveGif);
+            using var gif = new GifPreviewDialog(media, Edits, saveGif, gifCaption);
             gif.ShowDialog(this);
+            gifCaption = gif.Caption;
         };
         play.Click += (_, _) => TogglePlayback();
         rewind.Click += (_, _) => Skip(-5);
