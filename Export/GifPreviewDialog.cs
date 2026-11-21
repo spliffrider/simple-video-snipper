@@ -5,18 +5,10 @@ internal sealed class GifPreviewDialog : Form
     private readonly ClipEditMedia media;
     private readonly ClipEdits? edits;
     private readonly Func<IWin32Window, string, Task> saveGif;
+    private readonly GifCaptionEditor captionEditor;
     private readonly GifAnimationView preview = new() { Dock = DockStyle.Fill, AccessibleName = "Animated GIF preview" };
     private readonly ComboBox preset = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 95, AccessibleName = "GIF preset" };
     private readonly CheckBox hold = new() { Text = "Hold last frame for 1 second", AutoSize = true, Margin = new Padding(12, 6, 0, 0) };
-    private readonly TextBox captionText = new()
-    {
-        Multiline = true, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical, Height = 52,
-        Dock = DockStyle.Top, AccessibleName = "GIF caption",
-    };
-    private readonly ComboBox captionPosition = new()
-    {
-        DropDownStyle = ComboBoxStyle.DropDownList, Width = 95, Enabled = false, AccessibleName = "Caption position",
-    };
     private readonly ComboBox zoom = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 105, AccessibleName = "Preview zoom" };
     private readonly Button play = new() { Text = "Pause", AutoSize = true, MinimumSize = new Size(65, 0), Enabled = false };
     private readonly Button render = new() { Text = "Cancel render", AutoSize = true };
@@ -33,20 +25,18 @@ internal sealed class GifPreviewDialog : Form
         this.media = media;
         this.edits = edits;
         this.saveGif = saveGif;
+        captionEditor = new GifCaptionEditor(initialCaption);
         Text = "Preview GIF";
         StartPosition = FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(700, 550);
-        MinimumSize = new Size(510, 360);
+        ClientSize = new Size(750, 610);
+        MinimumSize = new Size(620, 440);
         MinimizeBox = false;
         ShowInTaskbar = false;
         Padding = new Padding(12);
 
         preset.Items.AddRange(["Small", "Clear"]);
         zoom.Items.AddRange(["Fit", "Actual size"]);
-        captionPosition.Items.AddRange(Enum.GetValues<GifCaptionPosition>().Cast<object>().ToArray());
-        captionPosition.SelectedItem = initialCaption?.Position ?? GifCaptionPosition.Bottom;
-        captionText.Text = initialCaption?.Text.ReplaceLineEndings() ?? "";
         preset.SelectedIndex = 0;
         zoom.SelectedIndex = 0;
         var back = new Button { Text = "Back", AutoSize = true, DialogResult = DialogResult.Cancel };
@@ -58,15 +48,6 @@ internal sealed class GifPreviewDialog : Form
             preset, hold]);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Margin = new Padding(0) };
         actions.Controls.AddRange([play, zoom, render, save, back]);
-        var caption = new TableLayoutPanel { ColumnCount = 4, AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 6) };
-        caption.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        caption.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        caption.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        caption.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        caption.Controls.Add(new Label { Text = "Caption", AutoSize = true, Margin = new Padding(0, 7, 4, 0) }, 0, 0);
-        caption.Controls.Add(captionText, 1, 0);
-        caption.Controls.Add(new Label { Text = "Position", AutoSize = true, Margin = new Padding(8, 7, 0, 0) }, 2, 0);
-        caption.Controls.Add(captionPosition, 3, 0);
         var layout = new TableLayoutPanel { ColumnCount = 1, RowCount = 5, Dock = DockStyle.Fill };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -76,15 +57,19 @@ internal sealed class GifPreviewDialog : Form
         layout.Controls.Add(options, 0, 0);
         layout.Controls.Add(preview, 0, 1);
         layout.Controls.Add(status, 0, 2);
-        layout.Controls.Add(caption, 0, 3);
+        layout.Controls.Add(captionEditor, 0, 3);
         layout.Controls.Add(actions, 0, 4);
         Controls.Add(layout);
 
         Shown += (_, _) => RequestRender();
         preset.SelectedIndexChanged += (_, _) => RequestRender();
         hold.CheckedChanged += (_, _) => RequestRender();
-        captionText.TextChanged += (_, _) => RequestRender(afterTyping: true);
-        captionPosition.SelectedIndexChanged += (_, _) => RequestRender();
+        captionEditor.Changed += () => RequestRender(afterTyping: true);
+        preview.CaptionMoved += point =>
+        {
+            if (!saving && !closing)
+                captionEditor.MoveTo(point);
+        };
         zoom.SelectedIndexChanged += (_, _) => preview.SetActualSize(zoom.SelectedIndex == 1);
         play.Click += (_, _) =>
         {
@@ -105,9 +90,7 @@ internal sealed class GifPreviewDialog : Form
         save.Click += async (_, _) => await SaveAsync();
     }
 
-    public GifCaption? Caption => string.IsNullOrWhiteSpace(captionText.Text)
-        ? null
-        : new GifCaption(captionText.Text.Trim().ReplaceLineEndings(), (GifCaptionPosition)captionPosition.SelectedItem!);
+    public GifCaption? Caption => captionEditor.Caption;
 
     private void RequestRender(bool afterTyping = false)
     {
@@ -115,7 +98,6 @@ internal sealed class GifPreviewDialog : Form
             return;
 
         var caption = Caption;
-        captionPosition.Enabled = caption is not null;
         renderRequest?.Cancel();
         RemovePreview();
         save.Enabled = play.Enabled = false;
@@ -142,14 +124,16 @@ internal sealed class GifPreviewDialog : Form
                     await Task.Delay(400, request.Token);
                 request.Token.ThrowIfCancellationRequested();
                 status.Text = $"Rendering {preset.Text} preview…";
-                output = await media.RenderGifAsync(edits, longestSide, fps, holdLastFrame, caption, request.Token);
+                var result = await media.RenderGifAsync(edits, longestSide, fps, holdLastFrame, caption, request.Token);
+                output = result.Path;
                 request.Token.ThrowIfCancellationRequested();
                 var length = new FileInfo(output).Length;
-                preview.Open(output);
+                preview.Open(output, result.CaptionBounds);
                 previewPath = output;
                 output = null;
                 var size = length >= 1_000_000 ? $"{length / 1_000_000d:0.##} MB" : $"{length / 1_000d:0.##} KB";
-                status.Text = $"{preview.ImageSize.Width} × {preview.ImageSize.Height} px  •  {fps} fps  •  {size}";
+                status.Text = $"{preview.ImageSize.Width} × {preview.ImageSize.Height} px  •  {fps} fps  •  {size}" +
+                    (caption is null ? "" : "  •  Drag the caption to move it.");
                 play.Enabled = preview.IsPlaying;
                 play.Text = preview.IsPlaying ? "Pause" : "Play";
                 save.Enabled = true;
@@ -182,7 +166,7 @@ internal sealed class GifPreviewDialog : Form
 
     private async Task SaveAsync()
     {
-        if (saving || closing || previewPath is not { } path)
+        if (saving || closing || preview.IsDraggingCaption || previewPath is not { } path)
             return;
 
         saving = true;
@@ -233,8 +217,7 @@ internal sealed class GifPreviewDialog : Form
 
     private void SetOptionsEnabled(bool enabled)
     {
-        preset.Enabled = hold.Enabled = captionText.Enabled = enabled;
-        captionPosition.Enabled = enabled && !string.IsNullOrWhiteSpace(captionText.Text);
+        preset.Enabled = hold.Enabled = captionEditor.Enabled = preview.Enabled = enabled;
     }
 
     private void RemovePreview()

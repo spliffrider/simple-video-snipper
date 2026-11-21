@@ -92,7 +92,7 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
         return new Bitmap(image);
     }
 
-    public async Task<string> RenderGifAsync(ClipEdits? edits, int longestSide, int frameRate, bool holdLastFrame,
+    public async Task<(string Path, Rectangle CaptionBounds)> RenderGifAsync(ClipEdits? edits, int longestSide, int frameRate, bool holdLastFrame,
         GifCaption? caption, CancellationToken cancellationToken)
     {
         var start = edits?.Start ?? TimeSpan.Zero;
@@ -105,8 +105,12 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
         var palette = Path.ChangeExtension(output, ".palette.png");
         var overlay = Path.ChangeExtension(output, ".caption.png");
         var crop = edits?.Crop is { } area ? CropFilter(area, edits.SourceSize) : FitTo(VideoSize);
+        var size = GifCaption.ScaleFrame(edits?.Crop?.Size ?? VideoSize, longestSide);
+        var scale = caption is null
+            ? FormattableString.Invariant($"scale=w='min(iw,{longestSide})':h='min(ih,{longestSide})':force_original_aspect_ratio=decrease")
+            : FormattableString.Invariant($"scale={size.Width}:{size.Height}");
         var filters = FormattableString.Invariant(
-            $"trim=duration={MediaTool.Seconds(end - start)},setpts=PTS-STARTPTS,fps={frameRate}:round=up,{crop},scale=w='min(iw,{longestSide})':h='min(ih,{longestSide})':force_original_aspect_ratio=decrease:flags=lanczos,setsar=1");
+            $"trim=duration={MediaTool.Seconds(end - start)},setpts=PTS-STARTPTS,fps={frameRate}:round=up,{crop},{scale}:flags=lanczos,setsar=1");
         string[] source = ["-nostdin", "-v", "error", "-xerror", "-n", "-protocol_whitelist", "file",
             "-ss", MediaTool.Seconds(start), "-i", previewPath];
         try
@@ -115,9 +119,10 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
             string[] captionInput = [];
             var video = $"[0:v:0]{filters}";
             var paletteIndex = 1;
+            var captionBounds = Rectangle.Empty;
             if (caption is not null)
             {
-                caption.WriteOverlay(overlay, edits?.Crop?.Size ?? VideoSize, longestSide);
+                captionBounds = caption.WriteOverlay(overlay, size);
                 captionInput = ["-protocol_whitelist", "file", "-i", overlay];
                 video += "[base];[base][1:v:0]overlay=format=rgb";
                 paletteIndex++;
@@ -133,7 +138,7 @@ internal sealed class ClipEditMedia(PendingClip clip, string ffmpeg, string ffpr
                 "-map", "[gif]", "-an", "-abort_on", "empty_output_stream", "-loop", "0",
                 "-final_delay", holdLastFrame ? "100" : "-1", "-f", "gif", output],
                 "Could not render the GIF.", cancellationToken: cancellationToken).ConfigureAwait(false);
-            return output;
+            return (output, captionBounds);
         }
         catch
         {
