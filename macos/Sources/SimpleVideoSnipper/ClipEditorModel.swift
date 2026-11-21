@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class ClipEditorModel: ObservableObject {
     let media: ClipEditMedia
+    var gifCaption = GIFCaption()
     @Published private(set) var edits: ClipEdits
     // The editor playhead is always in source time, including while a trimmed preview plays.
     @Published private(set) var position: Double = 0

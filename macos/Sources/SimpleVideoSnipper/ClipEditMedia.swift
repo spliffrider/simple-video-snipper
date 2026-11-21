@@ -138,29 +138,44 @@ final class ClipEditMedia: Sendable {
         ], context: "Could not read the preview frame.")
     }
 
-    func renderGIF(_ edits: ClipEdits, preset: GIFPreset, holdLastFrame: Bool) async throws -> URL {
+    func renderGIF(_ edits: ClipEdits, preset: GIFPreset, holdLastFrame: Bool, caption: GIFCaption) async throws -> URL {
         let stem = scratch.appendingPathComponent("gif-\(UUID().uuidString)")
         let output = stem.appendingPathExtension("gif")
-        let palette = stem.appendingPathExtension("png")
-        defer { try? FileManager.default.removeItem(at: palette) }
+        let palette = stem.appendingPathExtension("palette.png")
+        let overlay = stem.appendingPathExtension("caption.png")
+        defer {
+            try? FileManager.default.removeItem(at: palette)
+            if caption.hasText { try? FileManager.default.removeItem(at: overlay) }
+        }
         let limit = preset.longestSide
         let video = (ClipRenderer.trimAndCropFilters(edits) + [
             "fps=\(preset.frameRate):round=up",
             "scale=w='min(iw,\(limit))':h='min(ih,\(limit))':force_original_aspect_ratio=decrease:flags=lanczos",
             "setsar=1",
         ]).joined(separator: ",")
-        let source = ["-nostdin", "-v", "error", "-n", "-reinit_filter:v", "0",
+        var source = ["-nostdin", "-v", "error", "-n", "-reinit_filter:v", "0",
                       "-protocol_whitelist", "file", "-i", frameSource.path]
+        var graph = "[0:v:0]" + video
+        var paletteIndex = 1
         do {
+            try Task.checkCancellation()
+            if caption.hasText {
+                try caption.writeOverlay(to: overlay, width: edits.crop?.width ?? edits.source.width,
+                                         height: edits.crop?.height ?? edits.source.height, longestSide: limit)
+                source += ["-protocol_whitelist", "file", "-i", overlay.path]
+                graph += "[base];[base][1:v:0]overlay=format=rgb"
+                paletteIndex = 2
+            }
             // Two passes allow a shared palette without buffering the entire clip.
             _ = try await MediaTool.ffmpeg.run(source + [
-                "-filter_threads", "2", "-map", "0:v:0", "-an", "-vf", video + ",palettegen",
+                "-filter_complex_threads", "2", "-filter_complex", graph + ",palettegen[colors]",
+                "-map", "[colors]", "-an",
                 "-frames:v", "1", "-threads", "1", "-update", "1", palette.path,
             ], context: "Could not prepare GIF colors.")
             try Task.checkCancellation()
             _ = try await MediaTool.ffmpeg.run(source + [
                 "-protocol_whitelist", "file", "-i", palette.path, "-filter_complex_threads", "2",
-                "-filter_complex", "[0:v:0]\(video)[video];[video][1:v:0]paletteuse=diff_mode=rectangle[gif]",
+                "-filter_complex", "\(graph)[video];[video][\(paletteIndex):v:0]paletteuse=diff_mode=rectangle[gif]",
                 "-map", "[gif]", "-an", "-abort_on", "empty_output_stream", "-loop", "0",
                 "-final_delay", holdLastFrame ? "100" : "-1", output.path,
             ], context: "Could not render the GIF.")

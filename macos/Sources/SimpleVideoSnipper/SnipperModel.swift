@@ -552,7 +552,7 @@ final class SnipperModel: ObservableObject {
     private func showGIFPreview(for clip: PendingClip) {
         guard phase == .editing, let parent = interaction, let editor, gifSheet == nil else { return }
         if editor.isPlaying { editor.togglePlayback() }
-        let preview = GIFPreviewModel(media: editor.media, edits: editor.edits)
+        let preview = GIFPreviewModel(media: editor.media, edits: editor.edits, caption: editor.gifCaption)
         let size = CGSize(width: min(760, parent.frame.width), height: min(540, parent.frame.height - 30))
         let sheet = SnipperPanel("Export GIF", size: size) {
             GIFPreviewView(model: preview, save: { [weak self, weak preview] in
@@ -569,7 +569,10 @@ final class SnipperModel: ObservableObject {
     }
 
     private func closeGIFPreview() {
-        gifPreview?.close()
+        if let gifPreview {
+            editor?.gifCaption = gifPreview.caption
+            gifPreview.close()
+        }
         gifPreview = nil
         guard let sheet = gifSheet else { return }
         gifSheet = nil

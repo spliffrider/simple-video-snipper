@@ -15,6 +15,11 @@ enum GIFPreset: String, CaseIterable, Identifiable {
 final class GIFPreviewModel: ObservableObject {
     @Published var preset = GIFPreset.small { didSet { if preset != oldValue { render() } } }
     @Published var holdLastFrame = false { didSet { if holdLastFrame != oldValue { render() } } }
+    @Published var caption: GIFCaption {
+        didSet {
+            if caption != oldValue { render(afterTyping: caption.text != oldValue.text) }
+        }
+    }
     @Published private(set) var image: CGImage?
     @Published private(set) var output: URL?
     @Published private(set) var size = CGSize.zero
@@ -31,12 +36,13 @@ final class GIFPreviewModel: ObservableObject {
     private var imageSource: CGImageSource?
     private var frameIndex = 0
 
-    init(media: ClipEditMedia, edits: ClipEdits) {
+    init(media: ClipEditMedia, edits: ClipEdits, caption: GIFCaption) {
         self.media = media
         self.edits = edits
+        self.caption = caption
     }
 
-    func render() {
+    func render(afterTyping: Bool = false) {
         guard !isSaving else { return }
         cancelRender()
         clearPreview()
@@ -44,9 +50,11 @@ final class GIFPreviewModel: ObservableObject {
         isRendering = true
         let preset = self.preset
         let hold = holdLastFrame
+        let caption = self.caption
         renderTask = Task { [weak self, media, edits] in
             do {
-                let url = try await media.renderGIF(edits, preset: preset, holdLastFrame: hold)
+                if afterTyping { try await Task.sleep(for: .milliseconds(400)) }
+                let url = try await media.renderGIF(edits, preset: preset, holdLastFrame: hold, caption: caption)
                 guard let self, !Task.isCancelled else {
                     try? FileManager.default.removeItem(at: url)
                     return
@@ -180,6 +188,22 @@ struct GIFPreviewView: View {
             } else if let error = model.error {
                 Text(error).foregroundStyle(.red).font(.callout).lineLimit(3)
             }
+
+            HStack(alignment: .top, spacing: 10) {
+                Text("Caption").padding(.top, 5)
+                TextEditor(text: $model.caption.text)
+                    .font(.body)
+                    .frame(height: 54)
+                    .border(Color.secondary.opacity(0.35))
+                    .accessibilityLabel("GIF caption")
+                Picker("Position", selection: $model.caption.position) {
+                    ForEach(GIFCaption.Position.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .frame(width: 146)
+                .accessibilityLabel("Caption position")
+                .disabled(!model.caption.hasText)
+            }
+            .disabled(model.isSaving)
 
             Divider()
             HStack {
